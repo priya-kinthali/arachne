@@ -390,6 +390,7 @@ func (s *Scraper) scrapeURLSync(ctx context.Context, urlStr string) ScrapedData 
 			data.Status = result.StatusCode
 			data.Size = len(result.Body)
 			data.Title = result.Title
+			data.NextURL = result.NextURL
 
 			return nil
 		})

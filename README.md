@@ -173,57 +173,6 @@ Content Parser → Metrics Collection → ResultProcessor → JSON Export
 
 For detailed running instructions, see **[RUNNING.md](RUNNING.md)** - a comprehensive guide with examples, troubleshooting, and use cases.
 
-### Quick Start
-```bash
-# Clone and run
-git clone https://github.com/kareemsasa3/go-practice.git
-cd go-practice
-go run *.go
-```
-
-### Basic Usage
-```bash
-# Run with default settings
-go run *.go
-
-# Run with custom configuration
-go run *.go -concurrent=5 -timeout=10s -log-level=debug
-
-# Run with environment variables
-SCRAPER_MAX_CONCURRENT=5 SCRAPER_LOG_LEVEL=debug go run *.go
-```
-
-### Using Makefile
-```bash
-# Show available commands
-make help
-
-# Run tests
-make test
-
-# Run benchmarks
-make benchmark
-
-# Build binary
-make build
-
-# Run with debug logging
-make run-debug
-
-# Performance testing
-make perf-test
-```
-
-### Environment Variables
-```bash
-export SCRAPER_MAX_CONCURRENT=5
-export SCRAPER_REQUEST_TIMEOUT=10s
-export SCRAPER_TOTAL_TIMEOUT=30s
-export SCRAPER_RETRY_ATTEMPTS=3
-export SCRAPER_LOG_LEVEL=info
-export SCRAPER_ENABLE_METRICS=true
-```
-
 ## 📈 Learning Journey
 
 This enhanced project demonstrates my ability to:

@@ -3,6 +3,9 @@
 
 .PHONY: help build test test-verbose benchmark clean run run-debug lint format check-deps install
 
+# Get all Go source files (excluding test files)
+GO_FILES := $(shell find . -name "*.go" -not -name "*_test.go")
+
 # Default target
 help:
 	@echo "🚀 Go Web Scraper - Available Commands:"
@@ -33,18 +36,18 @@ help:
 # Build the scraper
 build:
 	@echo "🔨 Building Go Web Scraper..."
-	go build -o scraper main.go config.go logger.go metrics.go errors.go
+	go build -o scraper $(GO_FILES)
 	@echo "✅ Build complete: ./scraper"
 
 # Run the scraper with default settings
 run:
 	@echo "🚀 Running Go Web Scraper..."
-	go run *.go
+	go run $(GO_FILES)
 
 # Run with debug logging
 run-debug:
 	@echo "🔍 Running with debug logging..."
-	go run *.go -log-level=debug
+	go run $(GO_FILES) -log-level=debug
 
 # Run unit tests
 test:
@@ -109,31 +112,31 @@ setup: install
 # Run with custom parameters (example usage: make run-custom concurrent=5 timeout=5s)
 run-custom:
 	@echo "🚀 Running with custom parameters..."
-	go run *.go -concurrent=$(concurrent) -timeout=$(timeout) -log-level=$(log-level)
+	go run $(GO_FILES) -concurrent=$(concurrent) -timeout=$(timeout) -log-level=$(log-level)
 
 # Performance test with different concurrency levels
 perf-test:
 	@echo "📊 Performance testing with different concurrency levels..."
 	@echo "Testing with 1 concurrent request..."
-	go run *.go -concurrent=1 -metrics=true
+	go run $(GO_FILES) -concurrent=1 -metrics=true
 	@echo ""
 	@echo "Testing with 3 concurrent requests..."
-	go run *.go -concurrent=3 -metrics=true
+	go run $(GO_FILES) -concurrent=3 -metrics=true
 	@echo ""
 	@echo "Testing with 5 concurrent requests..."
-	go run *.go -concurrent=5 -metrics=true
+	go run $(GO_FILES) -concurrent=5 -metrics=true
 
 # Show help for command-line flags
 help-flags:
 	@echo "📋 Available command-line flags:"
-	@go run *.go -h 2>/dev/null || echo "Run 'go run *.go -h' to see available flags"
+	@go run $(GO_FILES) -h 2>/dev/null || echo "Run 'go run $(GO_FILES) -h' to see available flags"
 
 # Create release build
 release: clean
 	@echo "🏷️  Creating release build..."
-	GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o scraper-linux-amd64 *.go
-	GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o scraper-darwin-amd64 *.go
-	GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o scraper-windows-amd64.exe *.go
+	GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o scraper-linux-amd64 $(GO_FILES)
+	GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o scraper-darwin-amd64 $(GO_FILES)
+	GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o scraper-windows-amd64.exe $(GO_FILES)
 	@echo "✅ Release builds created:"
 	@ls -la scraper-*
 

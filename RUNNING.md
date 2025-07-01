@@ -24,7 +24,14 @@ go version
 
 ### 3. Run the Scraper (Basic)
 ```bash
-go run *.go
+# Option 1: Using the runner script (Recommended)
+./run.sh
+
+# Option 2: Using Makefile
+make run
+
+# Option 3: Manual file listing
+go run main.go config.go logger.go metrics.go errors.go
 ```
 
 That's it! The scraper will run with default settings and show you the results.
@@ -33,7 +40,14 @@ That's it! The scraper will run with default settings and show you the results.
 
 ### **Method 1: Basic Run (Recommended for first time)**
 ```bash
-go run *.go
+# Using the runner script (easiest)
+./run.sh
+
+# Using Makefile
+make run
+
+# Manual file listing
+go run main.go config.go logger.go metrics.go errors.go
 ```
 - Uses default settings
 - Scrapes 8 test URLs
@@ -57,17 +71,20 @@ make perf-test
 
 ### **Method 3: Custom Configuration**
 ```bash
-# High concurrency
-go run *.go -concurrent=10
+# Using runner script (recommended)
+./run.sh -concurrent=10
+./run.sh -log-level=debug
+./run.sh -timeout=15s -total-timeout=60s
+./run.sh -concurrent=5 -timeout=10s -log-level=info -metrics=true
 
-# Debug mode
-go run *.go -log-level=debug
+# Using Makefile
+make run-custom concurrent=5 timeout=10s log-level=debug
 
-# Custom timeouts
-go run *.go -timeout=15s -total-timeout=60s
-
-# All options
-go run *.go -concurrent=5 -timeout=10s -log-level=info -metrics=true
+# Manual file listing
+go run main.go config.go logger.go metrics.go errors.go -concurrent=10
+go run main.go config.go logger.go metrics.go errors.go -log-level=debug
+go run main.go config.go logger.go metrics.go errors.go -timeout=15s -total-timeout=60s
+go run main.go config.go logger.go metrics.go errors.go -concurrent=5 -timeout=10s -log-level=info -metrics=true
 ```
 
 ### **Method 4: Environment Variables**
@@ -78,7 +95,7 @@ export SCRAPER_LOG_LEVEL=debug
 export SCRAPER_ENABLE_METRICS=true
 
 # Run
-go run *.go
+./run.sh
 ```
 
 ## 📊 Command-Line Options
@@ -115,19 +132,19 @@ go run *.go
 
 ### **Quick Test Run**
 ```bash
-go run *.go -concurrent=2 -log-level=info
+./run.sh -concurrent=2 -log-level=info
 ```
 Perfect for testing if everything works.
 
 ### **Development Mode**
 ```bash
-go run *.go -log-level=debug -metrics=true
+./run.sh -log-level=debug -metrics=true
 ```
 Shows detailed logs and performance metrics.
 
 ### **High-Performance Run**
 ```bash
-go run *.go -concurrent=10 -timeout=5s -retries=2
+./run.sh -concurrent=10 -timeout=5s -retries=2
 ```
 For scraping many URLs quickly.
 
@@ -137,8 +154,7 @@ export SCRAPER_MAX_CONCURRENT=5
 export SCRAPER_REQUEST_TIMEOUT=15s
 export SCRAPER_LOG_LEVEL=warn
 export SCRAPER_ENABLE_METRICS=true
-go run *.go
-```
+go run main.go config.go logger.go metrics.go errors.go
 Conservative settings for production use.
 
 ### **Custom URLs (Advanced)**
@@ -259,13 +275,13 @@ make clean
 ### **Getting Help**
 ```bash
 # Show help
-go run *.go -h
+./run.sh -h
 
 # Show Makefile help
 make help
 
 # Run with debug logging
-go run *.go -log-level=debug
+./run.sh -log-level=debug
 ```
 
 ## 🎉 Success Indicators

@@ -171,6 +171,16 @@ Content Parser → Metrics Collection → ResultProcessor → JSON Export
 
 ## 🚀 Running the Enhanced Project
 
+For detailed running instructions, see **[RUNNING.md](RUNNING.md)** - a comprehensive guide with examples, troubleshooting, and use cases.
+
+### Quick Start
+```bash
+# Clone and run
+git clone https://github.com/kareemsasa3/go-practice.git
+cd go-practice
+go run *.go
+```
+
 ### Basic Usage
 ```bash
 # Run with default settings

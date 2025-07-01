@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/url"
 	"os"
 	"strings"
@@ -13,21 +12,17 @@ import (
 )
 
 // HeadlessStrategy implements scraping using headless Chrome browser
-type HeadlessStrategy struct {
-	timeout time.Duration
-}
+type HeadlessStrategy struct{}
 
 // NewHeadlessStrategy creates a new headless browser strategy
 func NewHeadlessStrategy() *HeadlessStrategy {
-	return &HeadlessStrategy{
-		timeout: 15 * time.Second, // Reduced timeout for faster debugging
-	}
+	return &HeadlessStrategy{}
 }
 
 // Execute performs headless browser-based scraping
 func (s *HeadlessStrategy) Execute(ctx context.Context, urlStr string, config *Config) (*ScrapedResult, error) {
 	// Create a new chromedp context from the parent context with timeout
-	taskCtx, cancel := context.WithTimeout(ctx, s.timeout)
+	taskCtx, cancel := context.WithTimeout(ctx, config.RequestTimeout)
 	defer cancel()
 
 	// Create chromedp context with options that ignore SSL errors
@@ -49,9 +44,7 @@ func (s *HeadlessStrategy) Execute(ctx context.Context, urlStr string, config *C
 	allocCtx, cancel := chromedp.NewExecAllocator(taskCtx, opts...)
 	defer cancel()
 
-	// Add verbose logging to see all Chrome DevTools Protocol communication
-	debugLogger := chromedp.WithDebugf(log.Printf)
-	chromeCtx, cancel := chromedp.NewContext(allocCtx, debugLogger)
+	chromeCtx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
 	var title string

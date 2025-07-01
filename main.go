@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -26,29 +27,42 @@ type ScrapedData struct {
 
 // Scraper handles concurrent web scraping with rate limiting
 type Scraper struct {
-	config         *Config
-	logger         *Logger
-	metrics        *Metrics
-	client         *http.Client
-	rateLimiter    chan struct{}
-	domainLimiters map[string]chan struct{}
-	results        chan ScrapedData
-	wg             sync.WaitGroup
-	mu             sync.RWMutex
+	config          *Config
+	logger          *Logger
+	metrics         *Metrics
+	client          *http.Client
+	rateLimiter     chan struct{}
+	domainLimiters  map[string]chan struct{}
+	circuitBreakers map[string]*CircuitBreaker
+	results         chan ScrapedData
+	wg              sync.WaitGroup
+	mu              sync.RWMutex
 }
 
 // NewScraper creates a new scraper with configurable concurrency
 func NewScraper(config *Config) *Scraper {
+	// Create transport with connection pooling and HTTP/2 support
+	transport := &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+		DisableCompression:  false, // Enable compression
+		ForceAttemptHTTP2:   true,  // Force HTTP/2 when possible
+	}
+
 	scraper := &Scraper{
 		config:  config,
 		logger:  NewLogger(config.LogLevel),
 		metrics: NewMetrics(),
 		client: &http.Client{
-			Timeout: config.RequestTimeout,
+			Timeout:   config.RequestTimeout,
+			Transport: transport,
 		},
-		rateLimiter:    make(chan struct{}, config.MaxConcurrent),
-		domainLimiters: make(map[string]chan struct{}),
-		results:        make(chan ScrapedData, 100),
+		rateLimiter:     make(chan struct{}, config.MaxConcurrent),
+		domainLimiters:  make(map[string]chan struct{}),
+		circuitBreakers: make(map[string]*CircuitBreaker),
+		results:         make(chan ScrapedData, 100),
 	}
 
 	// Initialize domain-specific rate limiters
@@ -75,9 +89,18 @@ func (s *Scraper) scrapeURL(ctx context.Context, urlStr string) {
 		return
 	}
 
-	// Extract domain for rate limiting
+	// Extract domain for rate limiting and circuit breaker
 	parsedURL, _ := url.Parse(urlStr)
 	domain := parsedURL.Host
+
+	// Get or create circuit breaker for this domain
+	s.mu.Lock()
+	cb, exists := s.circuitBreakers[domain]
+	if !exists {
+		cb = NewCircuitBreaker(s.config.CircuitBreakerThreshold, s.config.CircuitBreakerTimeout)
+		s.circuitBreakers[domain] = cb
+	}
+	s.mu.Unlock()
 
 	// Acquire global rate limiter slot
 	s.rateLimiter <- struct{}{}
@@ -101,28 +124,69 @@ func (s *Scraper) scrapeURL(ctx context.Context, urlStr string) {
 	// Record request in metrics
 	s.metrics.RecordRequest()
 
-	// Attempt scraping with retry logic
+	// Attempt scraping with retry logic and circuit breaker
 	var lastErr error
 	for attempt := 1; attempt <= s.config.RetryAttempts; attempt++ {
 		start := time.Now()
 
-		// Create request with context for cancellation
-		req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
-		if err != nil {
-			lastErr = NewScraperError(urlStr, "Failed to create request", err)
-			break
-		}
+		// Execute request with circuit breaker protection
+		err := cb.Execute(func() error {
+			// Create request with context for cancellation
+			req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
+			if err != nil {
+				return NewScraperError(urlStr, "Failed to create request", err)
+			}
 
-		// Set user agent to be respectful
-		req.Header.Set("User-Agent", s.config.UserAgent)
+			// Set user agent to be respectful
+			req.Header.Set("User-Agent", s.config.UserAgent)
 
-		// Make the request
-		resp, err := s.client.Do(req)
+			// Make the request
+			resp, err := s.client.Do(req)
+			if err != nil {
+				return NewScraperError(urlStr, "Request failed", err)
+			}
+			defer resp.Body.Close()
+
+			// Check for HTTP errors
+			if resp.StatusCode >= 400 {
+				return NewHTTPError(urlStr, resp.StatusCode, fmt.Sprintf("HTTP %d", resp.StatusCode))
+			}
+
+			// Read response body
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return NewScraperError(urlStr, "Failed to read body", err)
+			}
+
+			// Extract title from response
+			title := extractTitle(string(body), resp.Header.Get("Content-Type"))
+
+			// Record success in metrics
+			duration := time.Since(start)
+			s.metrics.RecordSuccess(domain, resp.StatusCode, int64(len(body)), duration)
+
+			// Log success
+			s.logger.LogSuccess(urlStr, resp.StatusCode, len(body), duration)
+
+			// Set data
+			data.Status = resp.StatusCode
+			data.Size = len(body)
+			data.Title = title
+
+			return nil
+		})
+
 		if err != nil {
-			lastErr = NewScraperError(urlStr, "Request failed", err)
+			lastErr = err
+
+			// Check if it's a circuit breaker error
+			if IsCircuitBreakerError(err) {
+				s.logger.Warn("Circuit breaker open for %s: %v", domain, err)
+				break
+			}
 
 			// Log retry attempt if retryable
-			if lastErr.(*ScraperError).IsRetryable() && attempt < s.config.RetryAttempts {
+			if scraperErr, ok := err.(*ScraperError); ok && scraperErr.IsRetryable() && attempt < s.config.RetryAttempts {
 				s.metrics.RecordRetry()
 				s.logger.LogRetry(urlStr, attempt, err)
 				time.Sleep(s.config.RetryDelay * time.Duration(attempt)) // Exponential backoff
@@ -130,43 +194,8 @@ func (s *Scraper) scrapeURL(ctx context.Context, urlStr string) {
 			}
 			break
 		}
-		defer resp.Body.Close()
 
-		// Check for HTTP errors
-		if resp.StatusCode >= 400 {
-			lastErr = NewHTTPError(urlStr, resp.StatusCode, fmt.Sprintf("HTTP %d", resp.StatusCode))
-
-			// Retry on retryable status codes
-			if lastErr.(*ScraperError).IsRetryable() && attempt < s.config.RetryAttempts {
-				s.metrics.RecordRetry()
-				s.logger.LogRetry(urlStr, attempt, lastErr)
-				time.Sleep(s.config.RetryDelay * time.Duration(attempt))
-				continue
-			}
-			break
-		}
-
-		// Read response body
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			lastErr = NewScraperError(urlStr, "Failed to read body", err)
-			break
-		}
-
-		// Extract title from response
-		title := extractTitle(string(body), resp.Header.Get("Content-Type"))
-
-		// Record success in metrics
-		duration := time.Since(start)
-		s.metrics.RecordSuccess(domain, resp.StatusCode, int64(len(body)), duration)
-
-		// Log success
-		s.logger.LogSuccess(urlStr, resp.StatusCode, len(body), duration)
-
-		// Set data and break out of retry loop
-		data.Status = resp.StatusCode
-		data.Size = len(body)
-		data.Title = title
+		// Success - break out of retry loop
 		lastErr = nil
 		break
 	}
@@ -234,8 +263,15 @@ func extractJSONTitle(jsonStr string) string {
 		}
 	}
 
-	// If no title field, return first meaningful string value
-	for key, value := range data {
+	// If no title field, return first meaningful string value in sorted order
+	keys := make([]string, 0, len(data))
+	for key := range data {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		value := data[key]
 		if str, ok := value.(string); ok && len(str) < 100 && str != "" {
 			return fmt.Sprintf("%s: %s", key, str)
 		}
@@ -390,6 +426,17 @@ func main() {
 	// Print metrics if enabled
 	if config.EnableMetrics {
 		scraper.metrics.PrintSummary()
+
+		// Print circuit breaker statistics
+		fmt.Printf("\n🔌 Circuit Breaker Statistics:\n")
+		fmt.Printf("===========================\n")
+		for domain, cb := range scraper.circuitBreakers {
+			stats := cb.GetStats()
+			fmt.Printf("🌐 %s: %s (%.1f%% failure rate)\n",
+				domain,
+				stats["state"],
+				stats["failure_rate"])
+		}
 	}
 
 	fmt.Printf("\n⏱️  Total time: %v\n", duration)

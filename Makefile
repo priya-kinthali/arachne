@@ -4,7 +4,7 @@
 .PHONY: help build test test-verbose benchmark clean run run-debug lint format check-deps install
 
 # Get all Go source files (excluding test files)
-GO_FILES := $(shell find . -name "*.go" -not -name "*_test.go")
+GO_FILES := $(shell find . -name "*.go" -not -name "*_test.go" -not -name "circuit_breaker_test.go")
 
 # Default target
 help:

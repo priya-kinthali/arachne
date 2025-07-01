@@ -9,33 +9,37 @@ import (
 
 // Config holds all configuration for the scraper
 type Config struct {
-	MaxConcurrent   int            `json:"max_concurrent"`
-	RequestTimeout  time.Duration  `json:"request_timeout"`
-	TotalTimeout    time.Duration  `json:"total_timeout"`
-	UserAgent       string         `json:"user_agent"`
-	OutputFile      string         `json:"output_file"`
-	RetryAttempts   int            `json:"retry_attempts"`
-	RetryDelay      time.Duration  `json:"retry_delay"`
-	EnableMetrics   bool           `json:"enable_metrics"`
-	EnableLogging   bool           `json:"enable_logging"`
-	LogLevel        string         `json:"log_level"`
-	DomainRateLimit map[string]int `json:"domain_rate_limit"`
+	MaxConcurrent           int            `json:"max_concurrent"`
+	RequestTimeout          time.Duration  `json:"request_timeout"`
+	TotalTimeout            time.Duration  `json:"total_timeout"`
+	UserAgent               string         `json:"user_agent"`
+	OutputFile              string         `json:"output_file"`
+	RetryAttempts           int            `json:"retry_attempts"`
+	RetryDelay              time.Duration  `json:"retry_delay"`
+	EnableMetrics           bool           `json:"enable_metrics"`
+	EnableLogging           bool           `json:"enable_logging"`
+	LogLevel                string         `json:"log_level"`
+	DomainRateLimit         map[string]int `json:"domain_rate_limit"`
+	CircuitBreakerThreshold int            `json:"circuit_breaker_threshold"`
+	CircuitBreakerTimeout   time.Duration  `json:"circuit_breaker_timeout"`
 }
 
 // DefaultConfig returns default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		MaxConcurrent:   3,
-		RequestTimeout:  10 * time.Second,
-		TotalTimeout:    30 * time.Second,
-		UserAgent:       "Go-Scraper/2.0",
-		OutputFile:      "scraping_results.json",
-		RetryAttempts:   3,
-		RetryDelay:      1 * time.Second,
-		EnableMetrics:   true,
-		EnableLogging:   true,
-		LogLevel:        "info",
-		DomainRateLimit: make(map[string]int),
+		MaxConcurrent:           3,
+		RequestTimeout:          10 * time.Second,
+		TotalTimeout:            30 * time.Second,
+		UserAgent:               "Go-Scraper/2.0",
+		OutputFile:              "scraping_results.json",
+		RetryAttempts:           3,
+		RetryDelay:              1 * time.Second,
+		EnableMetrics:           true,
+		EnableLogging:           true,
+		LogLevel:                "info",
+		DomainRateLimit:         make(map[string]int),
+		CircuitBreakerThreshold: 3,
+		CircuitBreakerTimeout:   30 * time.Second,
 	}
 }
 
@@ -94,6 +98,18 @@ func LoadConfig() *Config {
 		config.LogLevel = val
 	}
 
+	if val := os.Getenv("SCRAPER_CIRCUIT_BREAKER_THRESHOLD"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil {
+			config.CircuitBreakerThreshold = parsed
+		}
+	}
+
+	if val := os.Getenv("SCRAPER_CIRCUIT_BREAKER_TIMEOUT"); val != "" {
+		if parsed, err := time.ParseDuration(val); err == nil {
+			config.CircuitBreakerTimeout = parsed
+		}
+	}
+
 	return config
 }
 
@@ -130,7 +146,7 @@ func (c *Config) Validate() error {
 // String returns a string representation of the configuration
 func (c *Config) String() string {
 	return fmt.Sprintf(
-		"Config{MaxConcurrent: %d, RequestTimeout: %v, TotalTimeout: %v, UserAgent: %s, OutputFile: %s, RetryAttempts: %d, RetryDelay: %v, EnableMetrics: %t, EnableLogging: %t, LogLevel: %s}",
-		c.MaxConcurrent, c.RequestTimeout, c.TotalTimeout, c.UserAgent, c.OutputFile, c.RetryAttempts, c.RetryDelay, c.EnableMetrics, c.EnableLogging, c.LogLevel,
+		"Config{MaxConcurrent: %d, RequestTimeout: %v, TotalTimeout: %v, UserAgent: %s, OutputFile: %s, RetryAttempts: %d, RetryDelay: %v, EnableMetrics: %t, EnableLogging: %t, LogLevel: %s, CircuitBreakerThreshold: %d, CircuitBreakerTimeout: %v}",
+		c.MaxConcurrent, c.RequestTimeout, c.TotalTimeout, c.UserAgent, c.OutputFile, c.RetryAttempts, c.RetryDelay, c.EnableMetrics, c.EnableLogging, c.LogLevel, c.CircuitBreakerThreshold, c.CircuitBreakerTimeout,
 	)
 }

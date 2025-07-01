@@ -158,12 +158,22 @@ func TestValidateURL(t *testing.T) {
 		{
 			name:    "Invalid URL",
 			url:     "not-a-url",
-			wantErr: false,
+			wantErr: true,
 		},
 		{
 			name:    "Empty URL",
 			url:     "",
-			wantErr: false,
+			wantErr: true,
+		},
+		{
+			name:    "URL without scheme",
+			url:     "example.com",
+			wantErr: true,
+		},
+		{
+			name:    "URL with invalid scheme",
+			url:     "ftp://example.com",
+			wantErr: true,
 		},
 	}
 

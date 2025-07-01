@@ -120,10 +120,27 @@ func containsSubstring(s, substr string) bool {
 
 // ValidateURL validates if a URL is properly formatted
 func ValidateURL(urlStr string) error {
-	_, err := url.Parse(urlStr)
+	if urlStr == "" {
+		return fmt.Errorf("URL cannot be empty")
+	}
+
+	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
 		return fmt.Errorf("invalid URL format: %s", urlStr)
 	}
+
+	if parsedURL.Scheme == "" {
+		return fmt.Errorf("URL must have a scheme (http:// or https://): %s", urlStr)
+	}
+
+	if parsedURL.Host == "" {
+		return fmt.Errorf("URL must have a host: %s", urlStr)
+	}
+
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return fmt.Errorf("URL scheme must be http or https: %s", urlStr)
+	}
+
 	return nil
 }
 

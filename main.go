@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"sort"
@@ -23,6 +21,7 @@ type ScrapedData struct {
 	Size    int       `json:"size"`
 	Error   string    `json:"error,omitempty"`
 	Scraped time.Time `json:"scraped"`
+	NextURL string    `json:"next_url,omitempty"`
 }
 
 // Scraper handles concurrent web scraping with rate limiting
@@ -30,7 +29,7 @@ type Scraper struct {
 	config          *Config
 	logger          *Logger
 	metrics         *Metrics
-	client          *http.Client
+	strategy        ScrapingStrategy
 	rateLimiter     chan struct{}
 	domainLimiters  map[string]chan struct{}
 	circuitBreakers map[string]*CircuitBreaker
@@ -41,24 +40,18 @@ type Scraper struct {
 
 // NewScraper creates a new scraper with configurable concurrency
 func NewScraper(config *Config) *Scraper {
-	// Create transport with connection pooling and HTTP/2 support
-	transport := &http.Transport{
-		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     90 * time.Second,
-		TLSHandshakeTimeout: 10 * time.Second,
-		DisableCompression:  false, // Enable compression
-		ForceAttemptHTTP2:   true,  // Force HTTP/2 when possible
+	var strategy ScrapingStrategy
+	if config.UseHeadless {
+		strategy = NewHeadlessStrategy()
+	} else {
+		strategy = NewHTTPStrategy(config)
 	}
 
 	scraper := &Scraper{
-		config:  config,
-		logger:  NewLogger(config.LogLevel),
-		metrics: NewMetrics(),
-		client: &http.Client{
-			Timeout:   config.RequestTimeout,
-			Transport: transport,
-		},
+		config:          config,
+		logger:          NewLogger(config.LogLevel),
+		metrics:         NewMetrics(),
+		strategy:        strategy,
 		rateLimiter:     make(chan struct{}, config.MaxConcurrent),
 		domainLimiters:  make(map[string]chan struct{}),
 		circuitBreakers: make(map[string]*CircuitBreaker),
@@ -131,47 +124,24 @@ func (s *Scraper) scrapeURL(ctx context.Context, urlStr string) {
 
 		// Execute request with circuit breaker protection
 		err := cb.Execute(func() error {
-			// Create request with context for cancellation
-			req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
+			// Delegate the actual scraping to the strategy
+			result, err := s.strategy.Execute(ctx, urlStr, s.config)
 			if err != nil {
-				return NewScraperError(urlStr, "Failed to create request", err)
+				return err
 			}
-
-			// Set user agent to be respectful
-			req.Header.Set("User-Agent", s.config.UserAgent)
-
-			// Make the request
-			resp, err := s.client.Do(req)
-			if err != nil {
-				return NewScraperError(urlStr, "Request failed", err)
-			}
-			defer resp.Body.Close()
-
-			// Check for HTTP errors
-			if resp.StatusCode >= 400 {
-				return NewHTTPError(urlStr, resp.StatusCode, fmt.Sprintf("HTTP %d", resp.StatusCode))
-			}
-
-			// Read response body
-			body, err := io.ReadAll(resp.Body)
-			if err != nil {
-				return NewScraperError(urlStr, "Failed to read body", err)
-			}
-
-			// Extract title from response
-			title := extractTitle(string(body), resp.Header.Get("Content-Type"))
 
 			// Record success in metrics
 			duration := time.Since(start)
-			s.metrics.RecordSuccess(domain, resp.StatusCode, int64(len(body)), duration)
+			s.metrics.RecordSuccess(domain, result.StatusCode, int64(len(result.Body)), duration)
 
 			// Log success
-			s.logger.LogSuccess(urlStr, resp.StatusCode, len(body), duration)
+			s.logger.LogSuccess(urlStr, result.StatusCode, len(result.Body), duration)
 
 			// Set data
-			data.Status = resp.StatusCode
-			data.Size = len(body)
-			data.Title = title
+			data.Status = result.StatusCode
+			data.Size = len(result.Body)
+			data.Title = result.Title
+			data.NextURL = result.NextURL
 
 			return nil
 		})
@@ -311,6 +281,153 @@ func (s *Scraper) ScrapeURLs(urls []string) []ScrapedData {
 	return results
 }
 
+// ScrapeSite scrapes a site with pagination support
+func (s *Scraper) ScrapeSite(startURL string) []ScrapedData {
+	ctx, cancel := context.WithTimeout(context.Background(), s.config.TotalTimeout)
+	defer cancel()
+
+	s.logger.Info("Starting to scrape site %s with pagination support", startURL)
+
+	urlsToScrape := []string{startURL}
+	scrapedURLs := make(map[string]bool)
+	pageCount := 0
+
+	for len(urlsToScrape) > 0 && pageCount < s.config.MaxPages {
+		// Pop the next URL
+		url := urlsToScrape[0]
+		urlsToScrape = urlsToScrape[1:]
+
+		if scrapedURLs[url] {
+			continue
+		}
+		scrapedURLs[url] = true
+		pageCount++
+
+		s.logger.Info("Scraping page %d: %s", pageCount, url)
+
+		// Scrape this URL and get the result
+		result := s.scrapeURLSync(ctx, url)
+
+		// Add the result to our channel
+		s.results <- result
+
+		// If we got a next URL and haven't reached max pages, add it to the queue
+		if result.NextURL != "" && pageCount < s.config.MaxPages {
+			urlsToScrape = append(urlsToScrape, result.NextURL)
+			s.logger.Info("Found next page: %s", result.NextURL)
+		}
+	}
+
+	// Close results channel
+	close(s.results)
+
+	// Collect results
+	var results []ScrapedData
+	for data := range s.results {
+		results = append(results, data)
+	}
+
+	// Finish metrics collection
+	s.metrics.Finish()
+
+	return results
+}
+
+// scrapeURLSync scrapes a single URL synchronously and returns the result
+func (s *Scraper) scrapeURLSync(ctx context.Context, urlStr string) ScrapedData {
+	// Validate URL
+	if err := ValidateURL(urlStr); err != nil {
+		s.logger.Error("Invalid URL: %s", urlStr)
+		return ScrapedData{
+			URL:     urlStr,
+			Error:   err.Error(),
+			Scraped: time.Now(),
+		}
+	}
+
+	// Extract domain for rate limiting and circuit breaker
+	parsedURL, _ := url.Parse(urlStr)
+	domain := parsedURL.Host
+
+	// Get or create circuit breaker for this domain
+	s.mu.Lock()
+	cb, exists := s.circuitBreakers[domain]
+	if !exists {
+		cb = NewCircuitBreaker(s.config.CircuitBreakerThreshold, s.config.CircuitBreakerTimeout)
+		s.circuitBreakers[domain] = cb
+	}
+	s.mu.Unlock()
+
+	data := ScrapedData{
+		URL:     urlStr,
+		Scraped: time.Now(),
+	}
+
+	// Record request in metrics
+	s.metrics.RecordRequest()
+
+	// Attempt scraping with retry logic and circuit breaker
+	var lastErr error
+	for attempt := 1; attempt <= s.config.RetryAttempts; attempt++ {
+		start := time.Now()
+
+		// Execute request with circuit breaker protection
+		err := cb.Execute(func() error {
+			// Delegate the actual scraping to the strategy
+			result, err := s.strategy.Execute(ctx, urlStr, s.config)
+			if err != nil {
+				return err
+			}
+
+			// Record success in metrics
+			duration := time.Since(start)
+			s.metrics.RecordSuccess(domain, result.StatusCode, int64(len(result.Body)), duration)
+
+			// Log success
+			s.logger.LogSuccess(urlStr, result.StatusCode, len(result.Body), duration)
+
+			// Set data
+			data.Status = result.StatusCode
+			data.Size = len(result.Body)
+			data.Title = result.Title
+
+			return nil
+		})
+
+		if err != nil {
+			lastErr = err
+
+			// Check if it's a circuit breaker error
+			if IsCircuitBreakerError(err) {
+				s.logger.Warn("Circuit breaker open for %s: %v", domain, err)
+				break
+			}
+
+			// Log retry attempt if retryable
+			if scraperErr, ok := err.(*ScraperError); ok && scraperErr.IsRetryable() && attempt < s.config.RetryAttempts {
+				s.metrics.RecordRetry()
+				s.logger.LogRetry(urlStr, attempt, err)
+				time.Sleep(s.config.RetryDelay * time.Duration(attempt)) // Exponential backoff
+				continue
+			}
+			break
+		}
+
+		// Success - break out of retry loop
+		lastErr = nil
+		break
+	}
+
+	// Handle final error if all retries failed
+	if lastErr != nil {
+		data.Error = lastErr.Error()
+		s.metrics.RecordFailure(domain, 0)
+		s.logger.LogFailure(urlStr, lastErr)
+	}
+
+	return data
+}
+
 // ResultProcessor processes and formats results
 type ResultProcessor struct{}
 
@@ -367,6 +484,9 @@ func main() {
 		enableMetrics  = flag.Bool("metrics", true, "Enable metrics collection")
 		enableLogging  = flag.Bool("logging", true, "Enable logging")
 		userAgent      = flag.String("user-agent", "Go-Scraper/2.0", "User-Agent string")
+		useHeadless    = flag.Bool("headless", false, "Use headless browser for JavaScript-rendered sites")
+		maxPages       = flag.Int("max-pages", 10, "Maximum pages to scrape for pagination")
+		siteURL        = flag.String("site", "", "Single site URL to scrape with pagination")
 	)
 	flag.Parse()
 
@@ -384,6 +504,8 @@ func main() {
 	config.EnableMetrics = *enableMetrics
 	config.EnableLogging = *enableLogging
 	config.UserAgent = *userAgent
+	config.UseHeadless = *useHeadless
+	config.MaxPages = *maxPages
 
 	// Validate configuration
 	if err := config.Validate(); err != nil {
@@ -391,21 +513,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// URLs to scrape - mix of HTML and JSON APIs
-	urls := []string{
-		"https://golang.org",                           // HTML with title
-		"https://httpbin.org/get",                      // JSON API
-		"https://jsonplaceholder.typicode.com/posts/1", // JSON API
-		"https://api.github.com/users/golang",          // JSON API
-		"https://httpbin.org/status/404",               // Error response
-		"https://httpbin.org/delay/2",                  // Delayed response
-		"https://httpbin.org/status/500",               // Server error (retryable)
-		"https://httpbin.org/status/429",               // Rate limit (retryable)
-	}
-
 	fmt.Println("🚀 Starting Enhanced Concurrent Web Scraper in Go!")
 	fmt.Printf("Configuration: %s\n", config.String())
-	fmt.Printf("Scraping %d URLs with rate limiting...\n", len(urls))
 
 	// Create scraper with configuration
 	scraper := NewScraper(config)
@@ -413,8 +522,27 @@ func main() {
 	// Start timing
 	start := time.Now()
 
-	// Scrape URLs concurrently
-	results := scraper.ScrapeURLs(urls)
+	var results []ScrapedData
+
+	// Check if we're scraping a single site with pagination
+	if *siteURL != "" {
+		fmt.Printf("🌐 Scraping site with pagination: %s\n", *siteURL)
+		results = scraper.ScrapeSite(*siteURL)
+	} else {
+		// URLs to scrape - mix of HTML and JSON APIs
+		urls := []string{
+			"https://golang.org",                           // HTML with title
+			"https://httpbin.org/get",                      // JSON API
+			"https://jsonplaceholder.typicode.com/posts/1", // JSON API
+			"https://api.github.com/users/golang",          // JSON API
+			"https://httpbin.org/status/404",               // Error response
+			"https://httpbin.org/delay/2",                  // Delayed response
+			"https://httpbin.org/status/500",               // Server error (retryable)
+			"https://httpbin.org/status/429",               // Rate limit (retryable)
+		}
+		fmt.Printf("Scraping %d URLs with rate limiting...\n", len(urls))
+		results = scraper.ScrapeURLs(urls)
+	}
 
 	// Calculate duration
 	duration := time.Since(start)
@@ -474,4 +602,8 @@ func main() {
 	fmt.Println("   • JSON marshaling and parsing")
 	fmt.Println("   • HTTP client usage with proper headers")
 	fmt.Println("   • Content-type detection and parsing")
+	if config.UseHeadless {
+		fmt.Println("   • Headless browser support for JavaScript-rendered sites")
+		fmt.Println("   • Pagination support for multi-page scraping")
+	}
 }

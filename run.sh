@@ -49,6 +49,16 @@ echo "$GO_FILES" | sed 's/^/  /'
 print_info "Running Go Web Scraper..."
 echo ""
 
+# Check if headless mode is requested
+if [[ "$*" == *"-headless"* ]] || [[ "$*" == *"--headless"* ]]; then
+    print_info "🔍 Headless browser mode detected - JavaScript rendering enabled"
+fi
+
+# Check if site scraping is requested
+if [[ "$*" == *"-site"* ]] || [[ "$*" == *"--site"* ]]; then
+    print_info "🌐 Site scraping with pagination detected"
+fi
+
 # Run the scraper with all arguments passed to this script
 go run $GO_FILES "$@"
 

@@ -14,6 +14,8 @@ help:
 	@echo "  build        - Build the scraper binary"
 	@echo "  run          - Run the scraper with default settings"
 	@echo "  run-debug    - Run with debug logging enabled"
+	@echo "  run-headless - Run with headless browser for JavaScript sites"
+	@echo "  run-quotes   - Scrape quotes.toscrape.com with headless browser"
 	@echo ""
 	@echo "🧪 Testing:"
 	@echo "  test         - Run unit tests"
@@ -48,6 +50,16 @@ run:
 run-debug:
 	@echo "🔍 Running with debug logging..."
 	go run $(GO_FILES) -log-level=debug
+
+# Run with headless browser for JavaScript sites
+run-headless:
+	@echo "🔍 Running with headless browser for JavaScript sites..."
+	go run $(GO_FILES) -headless=true -site="https://js.quotes.toscrape.com" -max-pages=10
+
+# Run quotes.toscrape.com with headless browser
+run-quotes:
+	@echo "🌐 Scraping quotes.toscrape.com with headless browser..."
+	go run $(GO_FILES) -headless=true -site="https://js.quotes.toscrape.com" -max-pages=10 -log-level=info
 
 # Run unit tests
 test:

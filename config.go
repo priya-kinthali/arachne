@@ -22,6 +22,8 @@ type Config struct {
 	DomainRateLimit         map[string]int `json:"domain_rate_limit"`
 	CircuitBreakerThreshold int            `json:"circuit_breaker_threshold"`
 	CircuitBreakerTimeout   time.Duration  `json:"circuit_breaker_timeout"`
+	UseHeadless             bool           `json:"use_headless"`
+	MaxPages                int            `json:"max_pages"`
 }
 
 // DefaultConfig returns default configuration
@@ -40,6 +42,8 @@ func DefaultConfig() *Config {
 		DomainRateLimit:         make(map[string]int),
 		CircuitBreakerThreshold: 3,
 		CircuitBreakerTimeout:   30 * time.Second,
+		UseHeadless:             false,
+		MaxPages:                10,
 	}
 }
 
@@ -110,6 +114,16 @@ func LoadConfig() *Config {
 		}
 	}
 
+	if val := os.Getenv("SCRAPER_USE_HEADLESS"); val != "" {
+		config.UseHeadless = val == "true"
+	}
+
+	if val := os.Getenv("SCRAPER_MAX_PAGES"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil {
+			config.MaxPages = parsed
+		}
+	}
+
 	return config
 }
 
@@ -146,7 +160,7 @@ func (c *Config) Validate() error {
 // String returns a string representation of the configuration
 func (c *Config) String() string {
 	return fmt.Sprintf(
-		"Config{MaxConcurrent: %d, RequestTimeout: %v, TotalTimeout: %v, UserAgent: %s, OutputFile: %s, RetryAttempts: %d, RetryDelay: %v, EnableMetrics: %t, EnableLogging: %t, LogLevel: %s, CircuitBreakerThreshold: %d, CircuitBreakerTimeout: %v}",
-		c.MaxConcurrent, c.RequestTimeout, c.TotalTimeout, c.UserAgent, c.OutputFile, c.RetryAttempts, c.RetryDelay, c.EnableMetrics, c.EnableLogging, c.LogLevel, c.CircuitBreakerThreshold, c.CircuitBreakerTimeout,
+		"Config{MaxConcurrent: %d, RequestTimeout: %v, TotalTimeout: %v, UserAgent: %s, OutputFile: %s, RetryAttempts: %d, RetryDelay: %v, EnableMetrics: %t, EnableLogging: %t, LogLevel: %s, CircuitBreakerThreshold: %d, CircuitBreakerTimeout: %v, UseHeadless: %t, MaxPages: %d}",
+		c.MaxConcurrent, c.RequestTimeout, c.TotalTimeout, c.UserAgent, c.OutputFile, c.RetryAttempts, c.RetryDelay, c.EnableMetrics, c.EnableLogging, c.LogLevel, c.CircuitBreakerThreshold, c.CircuitBreakerTimeout, c.UseHeadless, c.MaxPages,
 	)
 }

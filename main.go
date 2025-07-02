@@ -67,7 +67,7 @@ func NewScraper(config *Config) *Scraper {
 }
 
 // scrapeURL fetches a single URL and extracts basic information with retry logic
-func (s *Scraper) scrapeURL(ctx context.Context, urlStr string) {
+func (s *Scraper) scrapeURL(ctx context.Context, urlStr string, resultsChan chan<- ScrapedData) {
 	defer s.wg.Done()
 
 	// Validate URL
@@ -78,7 +78,7 @@ func (s *Scraper) scrapeURL(ctx context.Context, urlStr string) {
 			Error:   err.Error(),
 			Scraped: time.Now(),
 		}
-		s.results <- data
+		resultsChan <- data
 		return
 	}
 
@@ -177,7 +177,7 @@ func (s *Scraper) scrapeURL(ctx context.Context, urlStr string) {
 		s.logger.LogFailure(urlStr, lastErr)
 	}
 
-	s.results <- data
+	resultsChan <- data
 }
 
 // extractTitle extracts title from HTML or JSON responses
@@ -257,21 +257,24 @@ func (s *Scraper) ScrapeURLs(urls []string) []ScrapedData {
 
 	s.logger.Info("Starting to scrape %d URLs with %d max concurrent requests", len(urls), s.config.MaxConcurrent)
 
+	// Create a new results channel for this scraping session
+	resultsChan := make(chan ScrapedData, len(urls))
+
 	// Start scraping goroutines
 	for _, url := range urls {
 		s.wg.Add(1)
-		go s.scrapeURL(ctx, url)
+		go s.scrapeURL(ctx, url, resultsChan)
 	}
 
 	// Close results channel when all goroutines complete
 	go func() {
 		s.wg.Wait()
-		close(s.results)
+		close(resultsChan)
 	}()
 
 	// Collect results
 	var results []ScrapedData
-	for data := range s.results {
+	for data := range resultsChan {
 		results = append(results, data)
 	}
 
@@ -287,6 +290,9 @@ func (s *Scraper) ScrapeSite(startURL string) []ScrapedData {
 	defer cancel()
 
 	s.logger.Info("Starting to scrape site %s with pagination support", startURL)
+
+	// Create a new results channel for this scraping session
+	resultsChan := make(chan ScrapedData, s.config.MaxPages)
 
 	urlsToScrape := []string{startURL}
 	scrapedURLs := make(map[string]bool)
@@ -309,7 +315,7 @@ func (s *Scraper) ScrapeSite(startURL string) []ScrapedData {
 		result := s.scrapeURLSync(ctx, url)
 
 		// Add the result to our channel
-		s.results <- result
+		resultsChan <- result
 
 		// If we got a next URL and haven't reached max pages, add it to the queue
 		if result.NextURL != "" && pageCount < s.config.MaxPages {
@@ -319,11 +325,11 @@ func (s *Scraper) ScrapeSite(startURL string) []ScrapedData {
 	}
 
 	// Close results channel
-	close(s.results)
+	close(resultsChan)
 
 	// Collect results
 	var results []ScrapedData
-	for data := range s.results {
+	for data := range resultsChan {
 		results = append(results, data)
 	}
 
@@ -488,6 +494,9 @@ func main() {
 		useHeadless    = flag.Bool("headless", false, "Use headless browser for JavaScript-rendered sites")
 		maxPages       = flag.Int("max-pages", 10, "Maximum pages to scrape for pagination")
 		siteURL        = flag.String("site", "", "Single site URL to scrape with pagination")
+		storageBackend = flag.String("storage", "json", "Storage backend (json, memory)")
+		enablePlugins  = flag.Bool("plugins", true, "Enable data processing plugins")
+		apiPort        = flag.Int("api-port", 0, "Start API server on port (0 = disabled)")
 	)
 	flag.Parse()
 
@@ -507,6 +516,8 @@ func main() {
 	config.UserAgent = *userAgent
 	config.UseHeadless = *useHeadless
 	config.MaxPages = *maxPages
+	config.StorageBackend = *storageBackend
+	config.EnablePlugins = *enablePlugins
 
 	// Validate configuration
 	if err := config.Validate(); err != nil {
@@ -585,6 +596,15 @@ func main() {
 				fmt.Printf("✅ Metrics saved to %s\n", metricsFile)
 			}
 		}
+	}
+
+	// Start API server if requested
+	if *apiPort > 0 {
+		fmt.Printf("\n🌐 Starting API server on port %d...\n", *apiPort)
+		if err := StartAPIServer(scraper, config, *apiPort); err != nil {
+			fmt.Printf("❌ Failed to start API server: %v\n", err)
+		}
+		return
 	}
 
 	fmt.Println("\n✨ Enhanced scraping complete! This demonstrates:")

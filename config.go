@@ -24,6 +24,8 @@ type Config struct {
 	CircuitBreakerTimeout   time.Duration  `json:"circuit_breaker_timeout"`
 	UseHeadless             bool           `json:"use_headless"`
 	MaxPages                int            `json:"max_pages"`
+	StorageBackend          string         `json:"storage_backend"`
+	EnablePlugins           bool           `json:"enable_plugins"`
 }
 
 // DefaultConfig returns default configuration
@@ -44,6 +46,8 @@ func DefaultConfig() *Config {
 		CircuitBreakerTimeout:   30 * time.Second,
 		UseHeadless:             false,
 		MaxPages:                10,
+		StorageBackend:          "json",
+		EnablePlugins:           true,
 	}
 }
 

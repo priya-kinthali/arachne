@@ -173,6 +173,37 @@ Content Parser → Metrics Collection → ResultProcessor → JSON Export
 
 For detailed running instructions, see **[RUNNING.md](RUNNING.md)** - a comprehensive guide with examples, troubleshooting, and use cases.
 
+### New Features in v2.0
+
+- **🔌 Plugin System**: Extensible data processing with custom plugins
+- **💾 Storage Backends**: Support for JSON and in-memory storage
+- **🌐 HTTP API**: RESTful API for remote scraping operations
+- **⚙️ Enhanced Configuration**: More configuration options and flexibility
+
+### API Usage
+
+Start the API server:
+```bash
+go run *.go -api-port=8080
+```
+
+Scrape URLs via API:
+```bash
+curl -X POST http://localhost:8080/scrape \
+  -H "Content-Type: application/json" \
+  -d '{"urls": ["https://golang.org", "https://httpbin.org/get"]}'
+```
+
+Check health:
+```bash
+curl http://localhost:8080/health
+```
+
+Get metrics:
+```bash
+curl http://localhost:8080/metrics
+```
+
 ## 📈 Learning Journey
 
 This enhanced project demonstrates my ability to:

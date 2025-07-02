@@ -1,4 +1,4 @@
-package main
+package strategy
 
 import (
 	"context"
@@ -10,6 +10,9 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/chromedp/chromedp"
+
+	"go-practice/internal/config"
+	"go-practice/internal/errors"
 )
 
 // HeadlessStrategy implements scraping using headless Chrome browser
@@ -21,9 +24,9 @@ func NewHeadlessStrategy() *HeadlessStrategy {
 }
 
 // Execute performs headless browser-based scraping
-func (s *HeadlessStrategy) Execute(ctx context.Context, urlStr string, config *Config) (*ScrapedResult, error) {
+func (s *HeadlessStrategy) Execute(ctx context.Context, urlStr string, cfg *config.Config) (*ScrapedResult, error) {
 	// Create a new chromedp context from the parent context with timeout
-	taskCtx, cancel := context.WithTimeout(ctx, config.RequestTimeout)
+	taskCtx, cancel := context.WithTimeout(ctx, cfg.RequestTimeout)
 	defer cancel()
 
 	// Create chromedp context with options that ignore SSL errors
@@ -71,13 +74,13 @@ func (s *HeadlessStrategy) Execute(ctx context.Context, urlStr string, config *C
 	)
 
 	if err != nil {
-		return nil, NewScraperError(urlStr, "Headless execution failed", err)
+		return nil, errors.NewScraperError(urlStr, "Headless execution failed", err)
 	}
 
 	// Use goquery to parse the HTML and extract content robustly
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(body))
 	if err != nil {
-		return nil, NewScraperError(urlStr, "Failed to parse HTML", err)
+		return nil, errors.NewScraperError(urlStr, "Failed to parse HTML", err)
 	}
 
 	// Extract next URL using CSS selector

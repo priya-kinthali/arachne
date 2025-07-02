@@ -1,4 +1,4 @@
-package main
+package strategy
 
 import (
 	"context"
@@ -6,6 +6,10 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"go-practice/internal/config"
+	"go-practice/internal/errors"
+	"go-practice/pkg/parser"
 )
 
 // ScrapedResult is a unified struct returned by any strategy.
@@ -19,7 +23,7 @@ type ScrapedResult struct {
 
 // ScrapingStrategy defines the contract for different scraping methods.
 type ScrapingStrategy interface {
-	Execute(ctx context.Context, urlStr string, config *Config) (*ScrapedResult, error)
+	Execute(ctx context.Context, urlStr string, config *config.Config) (*ScrapedResult, error)
 }
 
 // HTTPStrategy implements scraping using standard HTTP requests
@@ -28,7 +32,7 @@ type HTTPStrategy struct {
 }
 
 // NewHTTPStrategy creates a new HTTP strategy with the given configuration
-func NewHTTPStrategy(config *Config) *HTTPStrategy {
+func NewHTTPStrategy(cfg *config.Config) *HTTPStrategy {
 	// Create transport with connection pooling and HTTP/2 support
 	transport := &http.Transport{
 		MaxIdleConns:        100,
@@ -41,43 +45,43 @@ func NewHTTPStrategy(config *Config) *HTTPStrategy {
 
 	return &HTTPStrategy{
 		client: &http.Client{
-			Timeout:   config.RequestTimeout,
+			Timeout:   cfg.RequestTimeout,
 			Transport: transport,
 		},
 	}
 }
 
 // Execute performs HTTP-based scraping
-func (s *HTTPStrategy) Execute(ctx context.Context, urlStr string, config *Config) (*ScrapedResult, error) {
+func (s *HTTPStrategy) Execute(ctx context.Context, urlStr string, cfg *config.Config) (*ScrapedResult, error) {
 	// Create request with context for cancellation
 	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
 	if err != nil {
-		return nil, NewScraperError(urlStr, "Failed to create request", err)
+		return nil, errors.NewScraperError(urlStr, "Failed to create request", err)
 	}
 
 	// Set user agent to be respectful
-	req.Header.Set("User-Agent", config.UserAgent)
+	req.Header.Set("User-Agent", cfg.UserAgent)
 
 	// Make the request
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return nil, NewScraperError(urlStr, "Request failed", err)
+		return nil, errors.NewScraperError(urlStr, "Request failed", err)
 	}
 	defer resp.Body.Close()
 
 	// Check for HTTP errors
 	if resp.StatusCode >= 400 {
-		return nil, NewHTTPError(urlStr, resp.StatusCode, fmt.Sprintf("HTTP %d", resp.StatusCode))
+		return nil, errors.NewHTTPError(urlStr, resp.StatusCode, fmt.Sprintf("HTTP %d", resp.StatusCode))
 	}
 
 	// Read response body
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, NewScraperError(urlStr, "Failed to read body", err)
+		return nil, errors.NewScraperError(urlStr, "Failed to read body", err)
 	}
 
 	// Extract title from response
-	title := extractTitle(string(body), resp.Header.Get("Content-Type"))
+	title := parser.ExtractTitle(string(body), resp.Header.Get("Content-Type"))
 
 	// For HTTP strategy, we don't extract next URL (no JavaScript execution)
 	return &ScrapedResult{

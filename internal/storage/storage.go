@@ -1,4 +1,4 @@
-package main
+package storage
 
 import (
 	"context"
@@ -8,12 +8,14 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"go-practice/internal/types"
 )
 
 // StorageBackend defines the interface for different storage backends
 type StorageBackend interface {
-	Save(ctx context.Context, data []ScrapedData) error
-	Load(ctx context.Context) ([]ScrapedData, error)
+	Save(ctx context.Context, data []types.ScrapedData) error
+	Load(ctx context.Context) ([]types.ScrapedData, error)
 	Close() error
 }
 
@@ -28,7 +30,7 @@ func NewJSONStorage(filename string) *JSONStorage {
 }
 
 // Save saves scraped data to JSON file
-func (j *JSONStorage) Save(ctx context.Context, data []ScrapedData) error {
+func (j *JSONStorage) Save(ctx context.Context, data []types.ScrapedData) error {
 	jsonData, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal JSON: %v", err)
@@ -38,16 +40,16 @@ func (j *JSONStorage) Save(ctx context.Context, data []ScrapedData) error {
 }
 
 // Load loads scraped data from JSON file
-func (j *JSONStorage) Load(ctx context.Context) ([]ScrapedData, error) {
+func (j *JSONStorage) Load(ctx context.Context) ([]types.ScrapedData, error) {
 	data, err := os.ReadFile(j.filename)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return []ScrapedData{}, nil
+			return []types.ScrapedData{}, nil
 		}
 		return nil, fmt.Errorf("failed to read file: %v", err)
 	}
 
-	var results []ScrapedData
+	var results []types.ScrapedData
 	if err := json.Unmarshal(data, &results); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal JSON: %v", err)
 	}
@@ -62,22 +64,22 @@ func (j *JSONStorage) Close() error {
 
 // MemoryStorage implements StorageBackend for in-memory storage (useful for testing)
 type MemoryStorage struct {
-	data []ScrapedData
+	data []types.ScrapedData
 }
 
 // NewMemoryStorage creates a new in-memory storage backend
 func NewMemoryStorage() *MemoryStorage {
-	return &MemoryStorage{data: make([]ScrapedData, 0)}
+	return &MemoryStorage{data: make([]types.ScrapedData, 0)}
 }
 
 // Save saves scraped data to memory
-func (m *MemoryStorage) Save(ctx context.Context, data []ScrapedData) error {
+func (m *MemoryStorage) Save(ctx context.Context, data []types.ScrapedData) error {
 	m.data = append(m.data, data...)
 	return nil
 }
 
 // Load loads scraped data from memory
-func (m *MemoryStorage) Load(ctx context.Context) ([]ScrapedData, error) {
+func (m *MemoryStorage) Load(ctx context.Context) ([]types.ScrapedData, error) {
 	return m.data, nil
 }
 
@@ -97,12 +99,12 @@ func NewStorageManager(backend StorageBackend) *StorageManager {
 }
 
 // SaveResults saves scraping results
-func (sm *StorageManager) SaveResults(ctx context.Context, results []ScrapedData) error {
+func (sm *StorageManager) SaveResults(ctx context.Context, results []types.ScrapedData) error {
 	return sm.backend.Save(ctx, results)
 }
 
 // LoadResults loads previously saved results
-func (sm *StorageManager) LoadResults(ctx context.Context) ([]ScrapedData, error) {
+func (sm *StorageManager) LoadResults(ctx context.Context) ([]types.ScrapedData, error) {
 	return sm.backend.Load(ctx)
 }
 
@@ -297,4 +299,23 @@ func (m *InMemoryStorage) DeleteJob(ctx context.Context, jobID string) error {
 // Close is a no-op for in-memory storage
 func (m *InMemoryStorage) Close() error {
 	return nil
+}
+
+// ScrapeRequest represents a scraping request
+type ScrapeRequest struct {
+	URLs    []string `json:"urls"`
+	SiteURL string   `json:"site_url,omitempty"`
+}
+
+// ScrapingJob represents an asynchronous scraping job
+type ScrapingJob struct {
+	ID          string              `json:"id"`
+	Status      string              `json:"status"` // "pending", "running", "completed", "failed"
+	Request     ScrapeRequest       `json:"request"`
+	Results     []types.ScrapedData `json:"results,omitempty"`
+	Error       string              `json:"error,omitempty"`
+	CreatedAt   time.Time           `json:"created_at"`
+	StartedAt   *time.Time          `json:"started_at,omitempty"`
+	CompletedAt *time.Time          `json:"completed_at,omitempty"`
+	Progress    int                 `json:"progress"` // 0-100
 }

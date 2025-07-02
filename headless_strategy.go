@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/chromedp/chromedp"
 )
 
@@ -73,18 +74,17 @@ func (s *HeadlessStrategy) Execute(ctx context.Context, urlStr string, config *C
 		return nil, NewScraperError(urlStr, "Headless execution failed", err)
 	}
 
-	// Try to find the "Next" button for pagination (optional, non-blocking)
-	// First check if the element exists to avoid infinite loops
-	var elementExists bool
-	_ = chromedp.Run(chromeCtx,
-		chromedp.Evaluate(`document.querySelector('li.next a') !== null`, &elementExists),
-	)
+	// Use goquery to parse the HTML and extract content robustly
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(body))
+	if err != nil {
+		return nil, NewScraperError(urlStr, "Failed to parse HTML", err)
+	}
 
-	// Only try to get the href if the element exists
-	if elementExists {
-		_ = chromedp.Run(chromeCtx,
-			chromedp.AttributeValue("li.next a", "href", &nextURL, nil, chromedp.ByQuery),
-		)
+	// Extract next URL using CSS selector
+	if nextElement := doc.Find("li.next a"); nextElement.Length() > 0 {
+		if href, exists := nextElement.Attr("href"); exists {
+			nextURL = href
+		}
 	}
 
 	// If we found a next URL, make it absolute
@@ -97,7 +97,7 @@ func (s *HeadlessStrategy) Execute(ctx context.Context, urlStr string, config *C
 
 	// Extract a meaningful title from the content if the page title is generic
 	if title == "" || strings.Contains(strings.ToLower(title), "quotes") {
-		title = s.extractTitleFromContent(body)
+		title = s.extractTitleFromContent(doc)
 	}
 
 	return &ScrapedResult{
@@ -108,34 +108,26 @@ func (s *HeadlessStrategy) Execute(ctx context.Context, urlStr string, config *C
 	}, nil
 }
 
-// extractTitleFromContent extracts a meaningful title from the HTML content
-func (s *HeadlessStrategy) extractTitleFromContent(html string) string {
+// extractTitleFromContent extracts a meaningful title from the HTML content using goquery
+func (s *HeadlessStrategy) extractTitleFromContent(doc *goquery.Document) string {
 	// For quotes.toscrape.com, try to extract the first quote as title
-	// This is a simple extraction - in a real implementation, you might use a proper HTML parser
-
-	// Look for quote text in the content
-	if strings.Contains(html, "class=\"text\"") {
-		// Simple extraction - find the first quote text
-		start := strings.Index(html, "class=\"text\"")
-		if start != -1 {
-			// Find the opening and closing tags
-			openTag := strings.Index(html[start:], ">")
-			if openTag != -1 {
-				contentStart := start + openTag + 1
-				closeTag := strings.Index(html[contentStart:], "</div>")
-				if closeTag != -1 {
-					quote := html[contentStart : contentStart+closeTag]
-					// Clean up the quote (remove HTML entities, trim whitespace)
-					quote = strings.TrimSpace(quote)
-					if len(quote) > 0 {
-						// Limit length for title
-						if len(quote) > 100 {
-							quote = quote[:97] + "..."
-						}
-						return fmt.Sprintf("Quotes - %s", quote)
-					}
-				}
+	// Use CSS selector to find quote text
+	if quoteElement := doc.Find(".text"); quoteElement.Length() > 0 {
+		quote := strings.TrimSpace(quoteElement.First().Text())
+		if len(quote) > 0 {
+			// Limit length for title
+			if len(quote) > 100 {
+				quote = quote[:97] + "..."
 			}
+			return fmt.Sprintf("Quotes - %s", quote)
+		}
+	}
+
+	// Fallback: try to find any meaningful heading
+	if h1 := doc.Find("h1").First(); h1.Length() > 0 {
+		title := strings.TrimSpace(h1.Text())
+		if len(title) > 0 {
+			return title
 		}
 	}
 

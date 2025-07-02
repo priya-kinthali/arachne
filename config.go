@@ -26,6 +26,9 @@ type Config struct {
 	MaxPages                int            `json:"max_pages"`
 	StorageBackend          string         `json:"storage_backend"`
 	EnablePlugins           bool           `json:"enable_plugins"`
+	RedisAddr               string         `json:"redis_addr"`
+	RedisPassword           string         `json:"redis_password"`
+	RedisDB                 int            `json:"redis_db"`
 }
 
 // DefaultConfig returns default configuration
@@ -48,6 +51,9 @@ func DefaultConfig() *Config {
 		MaxPages:                10,
 		StorageBackend:          "json",
 		EnablePlugins:           true,
+		RedisAddr:               "",
+		RedisPassword:           "",
+		RedisDB:                 0,
 	}
 }
 
@@ -125,6 +131,20 @@ func LoadConfig() *Config {
 	if val := os.Getenv("SCRAPER_MAX_PAGES"); val != "" {
 		if parsed, err := strconv.Atoi(val); err == nil {
 			config.MaxPages = parsed
+		}
+	}
+
+	if val := os.Getenv("SCRAPER_REDIS_ADDR"); val != "" {
+		config.RedisAddr = val
+	}
+
+	if val := os.Getenv("SCRAPER_REDIS_PASSWORD"); val != "" {
+		config.RedisPassword = val
+	}
+
+	if val := os.Getenv("SCRAPER_REDIS_DB"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil {
+			config.RedisDB = parsed
 		}
 	}
 

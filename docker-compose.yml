@@ -1,0 +1,70 @@
+version: "3.8"
+
+services:
+  # Redis for persistent job storage
+  redis:
+    image: redis:7-alpine
+    container_name: scraper-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Main scraper application
+  scraper:
+    build: .
+    container_name: scraper-app
+    ports:
+      - "8080:8080"
+    environment:
+      - SCRAPER_REDIS_ADDR=redis:6379
+      - SCRAPER_REDIS_DB=0
+      - SCRAPER_ENABLE_METRICS=true
+      - SCRAPER_ENABLE_LOGGING=true
+      - SCRAPER_LOG_LEVEL=info
+      - SCRAPER_MAX_CONCURRENT=5
+      - SCRAPER_REQUEST_TIMEOUT=10s
+      - SCRAPER_TOTAL_TIMEOUT=30s
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:8080/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    volumes:
+      - ./scraping_results:/app/results
+
+  # Optional: Redis Commander for Redis management UI
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: redis-commander
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+    driver: local

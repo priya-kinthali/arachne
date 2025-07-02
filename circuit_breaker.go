@@ -54,10 +54,15 @@ type CircuitBreaker struct {
 
 // NewCircuitBreaker creates a new circuit breaker
 func NewCircuitBreaker(failureThreshold int, resetTimeout time.Duration) *CircuitBreaker {
+	return NewCircuitBreakerWithConfig(failureThreshold, resetTimeout, 1)
+}
+
+// NewCircuitBreakerWithConfig creates a new circuit breaker with custom configuration
+func NewCircuitBreakerWithConfig(failureThreshold int, resetTimeout time.Duration, halfOpenLimit int) *CircuitBreaker {
 	return &CircuitBreaker{
 		failureThreshold: failureThreshold,
 		resetTimeout:     resetTimeout,
-		halfOpenLimit:    1,
+		halfOpenLimit:    halfOpenLimit,
 		state:            StateClosed,
 		lastStateChange:  time.Now(),
 	}

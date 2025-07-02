@@ -70,16 +70,27 @@ func NewScraper(config *Config) *Scraper {
 func (s *Scraper) scrapeURL(ctx context.Context, urlStr string, resultsChan chan<- ScrapedData) {
 	defer s.wg.Done()
 
+	// Acquire rate limiters
+	s.acquireRateLimiters(urlStr)
+	defer s.releaseRateLimiters(urlStr)
+
+	// Perform the actual scraping
+	data := s.doScrape(ctx, urlStr)
+
+	// Send result to channel
+	resultsChan <- data
+}
+
+// doScrape contains the core scraping logic shared between concurrent and sync operations
+func (s *Scraper) doScrape(ctx context.Context, urlStr string) ScrapedData {
 	// Validate URL
 	if err := ValidateURL(urlStr); err != nil {
 		s.logger.Error("Invalid URL: %s", urlStr)
-		data := ScrapedData{
+		return ScrapedData{
 			URL:     urlStr,
 			Error:   err.Error(),
 			Scraped: time.Now(),
 		}
-		resultsChan <- data
-		return
 	}
 
 	// Extract domain for rate limiting and circuit breaker
@@ -94,20 +105,6 @@ func (s *Scraper) scrapeURL(ctx context.Context, urlStr string, resultsChan chan
 		s.circuitBreakers[domain] = cb
 	}
 	s.mu.Unlock()
-
-	// Acquire global rate limiter slot
-	s.rateLimiter <- struct{}{}
-	defer func() { <-s.rateLimiter }()
-
-	// Acquire domain-specific rate limiter if configured
-	s.mu.RLock()
-	domainLimiter, hasDomainLimit := s.domainLimiters[domain]
-	s.mu.RUnlock()
-
-	if hasDomainLimit {
-		domainLimiter <- struct{}{}
-		defer func() { <-domainLimiter }()
-	}
 
 	data := ScrapedData{
 		URL:     urlStr,
@@ -177,7 +174,43 @@ func (s *Scraper) scrapeURL(ctx context.Context, urlStr string, resultsChan chan
 		s.logger.LogFailure(urlStr, lastErr)
 	}
 
-	resultsChan <- data
+	return data
+}
+
+// acquireRateLimiters acquires both global and domain-specific rate limiters
+func (s *Scraper) acquireRateLimiters(urlStr string) {
+	// Acquire global rate limiter slot
+	s.rateLimiter <- struct{}{}
+
+	// Acquire domain-specific rate limiter if configured
+	parsedURL, _ := url.Parse(urlStr)
+	domain := parsedURL.Host
+
+	s.mu.RLock()
+	domainLimiter, hasDomainLimit := s.domainLimiters[domain]
+	s.mu.RUnlock()
+
+	if hasDomainLimit {
+		domainLimiter <- struct{}{}
+	}
+}
+
+// releaseRateLimiters releases both global and domain-specific rate limiters
+func (s *Scraper) releaseRateLimiters(urlStr string) {
+	// Release global rate limiter
+	<-s.rateLimiter
+
+	// Release domain-specific rate limiter if configured
+	parsedURL, _ := url.Parse(urlStr)
+	domain := parsedURL.Host
+
+	s.mu.RLock()
+	domainLimiter, hasDomainLimit := s.domainLimiters[domain]
+	s.mu.RUnlock()
+
+	if hasDomainLimit {
+		<-domainLimiter
+	}
 }
 
 // extractTitle extracts title from HTML or JSON responses
@@ -341,98 +374,12 @@ func (s *Scraper) ScrapeSite(startURL string) []ScrapedData {
 
 // scrapeURLSync scrapes a single URL synchronously and returns the result
 func (s *Scraper) scrapeURLSync(ctx context.Context, urlStr string) ScrapedData {
-	// Validate URL
-	if err := ValidateURL(urlStr); err != nil {
-		s.logger.Error("Invalid URL: %s", urlStr)
-		return ScrapedData{
-			URL:     urlStr,
-			Error:   err.Error(),
-			Scraped: time.Now(),
-		}
-	}
+	// Acquire rate limiters for synchronous operation
+	s.acquireRateLimiters(urlStr)
+	defer s.releaseRateLimiters(urlStr)
 
-	// Extract domain for rate limiting and circuit breaker
-	parsedURL, _ := url.Parse(urlStr)
-	domain := parsedURL.Host
-
-	// Get or create circuit breaker for this domain
-	s.mu.Lock()
-	cb, exists := s.circuitBreakers[domain]
-	if !exists {
-		cb = NewCircuitBreaker(s.config.CircuitBreakerThreshold, s.config.CircuitBreakerTimeout)
-		s.circuitBreakers[domain] = cb
-	}
-	s.mu.Unlock()
-
-	data := ScrapedData{
-		URL:     urlStr,
-		Scraped: time.Now(),
-	}
-
-	// Record request in metrics
-	s.metrics.RecordRequest()
-
-	// Attempt scraping with retry logic and circuit breaker
-	var lastErr error
-	for attempt := 1; attempt <= s.config.RetryAttempts; attempt++ {
-		start := time.Now()
-
-		// Execute request with circuit breaker protection
-		err := cb.Execute(func() error {
-			// Delegate the actual scraping to the strategy
-			result, err := s.strategy.Execute(ctx, urlStr, s.config)
-			if err != nil {
-				return err
-			}
-
-			// Record success in metrics
-			duration := time.Since(start)
-			s.metrics.RecordSuccess(domain, result.StatusCode, int64(len(result.Body)), duration)
-
-			// Log success
-			s.logger.LogSuccess(urlStr, result.StatusCode, len(result.Body), duration)
-
-			// Set data
-			data.Status = result.StatusCode
-			data.Size = len(result.Body)
-			data.Title = result.Title
-			data.NextURL = result.NextURL
-
-			return nil
-		})
-
-		if err != nil {
-			lastErr = err
-
-			// Check if it's a circuit breaker error
-			if IsCircuitBreakerError(err) {
-				s.logger.Warn("Circuit breaker open for %s: %v", domain, err)
-				break
-			}
-
-			// Log retry attempt if retryable
-			if scraperErr, ok := err.(*ScraperError); ok && scraperErr.IsRetryable() && attempt < s.config.RetryAttempts {
-				s.metrics.RecordRetry()
-				s.logger.LogRetry(urlStr, attempt, err)
-				time.Sleep(s.config.RetryDelay * time.Duration(attempt)) // Exponential backoff
-				continue
-			}
-			break
-		}
-
-		// Success - break out of retry loop
-		lastErr = nil
-		break
-	}
-
-	// Handle final error if all retries failed
-	if lastErr != nil {
-		data.Error = lastErr.Error()
-		s.metrics.RecordFailure(domain, 0)
-		s.logger.LogFailure(urlStr, lastErr)
-	}
-
-	return data
+	// Use the shared scraping logic
+	return s.doScrape(ctx, urlStr)
 }
 
 // ResultProcessor processes and formats results
@@ -479,6 +426,25 @@ func (rp *ResultProcessor) ExportToJSON(results []ScrapedData, filename string) 
 }
 
 func main() {
+	// Setup configuration
+	config := setupConfig()
+
+	// Create scraper and run scraping logic
+	scraper := NewScraper(config)
+	results := runScrapingLogic(scraper, config)
+
+	// Process and save results
+	processAndSaveResults(scraper, config, results)
+
+	// Start API server if requested
+	startAPIServerIfRequested(scraper, config)
+
+	// Print completion summary
+	printCompletionSummary(config)
+}
+
+// setupConfig parses command-line flags and loads configuration
+func setupConfig() *Config {
 	// Parse command-line flags
 	var (
 		maxConcurrent  = flag.Int("concurrent", 3, "Maximum concurrent requests")
@@ -493,10 +459,10 @@ func main() {
 		userAgent      = flag.String("user-agent", "Go-Scraper/2.0", "User-Agent string")
 		useHeadless    = flag.Bool("headless", false, "Use headless browser for JavaScript-rendered sites")
 		maxPages       = flag.Int("max-pages", 10, "Maximum pages to scrape for pagination")
-		siteURL        = flag.String("site", "", "Single site URL to scrape with pagination")
+		_              = flag.String("site", "", "Single site URL to scrape with pagination")
 		storageBackend = flag.String("storage", "json", "Storage backend (json, memory)")
 		enablePlugins  = flag.Bool("plugins", true, "Enable data processing plugins")
-		apiPort        = flag.Int("api-port", 0, "Start API server on port (0 = disabled)")
+		_              = flag.Int("api-port", 0, "Start API server on port (0 = disabled)")
 	)
 	flag.Parse()
 
@@ -528,37 +494,42 @@ func main() {
 	fmt.Println("🚀 Starting Enhanced Concurrent Web Scraper in Go!")
 	fmt.Printf("Configuration: %s\n", config.String())
 
-	// Create scraper with configuration
-	scraper := NewScraper(config)
+	return config
+}
 
-	// Start timing
+// runScrapingLogic executes the main scraping operation
+func runScrapingLogic(scraper *Scraper, _ *Config) []ScrapedData {
 	start := time.Now()
 
-	var results []ScrapedData
-
 	// Check if we're scraping a single site with pagination
-	if *siteURL != "" {
-		fmt.Printf("🌐 Scraping site with pagination: %s\n", *siteURL)
-		results = scraper.ScrapeSite(*siteURL)
-	} else {
-		// URLs to scrape - mix of HTML and JSON APIs
-		urls := []string{
-			"https://golang.org",                           // HTML with title
-			"https://httpbin.org/get",                      // JSON API
-			"https://jsonplaceholder.typicode.com/posts/1", // JSON API
-			"https://api.github.com/users/golang",          // JSON API
-			"https://httpbin.org/status/404",               // Error response
-			"https://httpbin.org/delay/2",                  // Delayed response
-			"https://httpbin.org/status/500",               // Server error (retryable)
-			"https://httpbin.org/status/429",               // Rate limit (retryable)
-		}
-		fmt.Printf("Scraping %d URLs with rate limiting...\n", len(urls))
-		results = scraper.ScrapeURLs(urls)
+	siteURL := flag.Lookup("site").Value.String()
+	if siteURL != "" {
+		fmt.Printf("🌐 Scraping site with pagination: %s\n", siteURL)
+		results := scraper.ScrapeSite(siteURL)
+		fmt.Printf("\n⏱️  Total time: %v\n", time.Since(start))
+		return results
 	}
 
-	// Calculate duration
-	duration := time.Since(start)
+	// URLs to scrape - mix of HTML and JSON APIs
+	urls := []string{
+		"https://golang.org",                           // HTML with title
+		"https://httpbin.org/get",                      // JSON API
+		"https://jsonplaceholder.typicode.com/posts/1", // JSON API
+		"https://api.github.com/users/golang",          // JSON API
+		"https://httpbin.org/status/404",               // Error response
+		"https://httpbin.org/delay/2",                  // Delayed response
+		"https://httpbin.org/status/500",               // Server error (retryable)
+		"https://httpbin.org/status/429",               // Rate limit (retryable)
+	}
+	fmt.Printf("Scraping %d URLs with rate limiting...\n", len(urls))
+	results := scraper.ScrapeURLs(urls)
 
+	fmt.Printf("\n⏱️  Total time: %v\n", time.Since(start))
+	return results
+}
+
+// processAndSaveResults handles result processing, display, and file export
+func processAndSaveResults(scraper *Scraper, config *Config, results []ScrapedData) {
 	// Process and display results
 	processor := &ResultProcessor{}
 	processor.ProcessResults(results)
@@ -566,20 +537,8 @@ func main() {
 	// Print metrics if enabled
 	if config.EnableMetrics {
 		scraper.metrics.PrintSummary()
-
-		// Print circuit breaker statistics
-		fmt.Printf("\n🔌 Circuit Breaker Statistics:\n")
-		fmt.Printf("===========================\n")
-		for domain, cb := range scraper.circuitBreakers {
-			stats := cb.GetStats()
-			fmt.Printf("🌐 %s: %s (%.1f%% failure rate)\n",
-				domain,
-				stats["state"],
-				stats["failure_rate"])
-		}
+		printCircuitBreakerStats(scraper)
 	}
-
-	fmt.Printf("\n⏱️  Total time: %v\n", duration)
 
 	// Export to JSON
 	fmt.Println("\n📄 Exporting results to JSON...")
@@ -589,24 +548,51 @@ func main() {
 
 	// Export metrics if enabled
 	if config.EnableMetrics {
-		metricsFile := "scraping_metrics.json"
-		metricsData, err := json.MarshalIndent(scraper.metrics.GetMetrics(), "", "  ")
-		if err == nil {
-			if err := os.WriteFile(metricsFile, metricsData, 0644); err == nil {
-				fmt.Printf("✅ Metrics saved to %s\n", metricsFile)
+		exportMetrics(scraper)
+	}
+}
+
+// printCircuitBreakerStats displays circuit breaker statistics
+func printCircuitBreakerStats(scraper *Scraper) {
+	fmt.Printf("\n🔌 Circuit Breaker Statistics:\n")
+	fmt.Printf("===========================\n")
+	for domain, cb := range scraper.circuitBreakers {
+		stats := cb.GetStats()
+		fmt.Printf("🌐 %s: %s (%.1f%% failure rate)\n",
+			domain,
+			stats["state"],
+			stats["failure_rate"])
+	}
+}
+
+// exportMetrics saves metrics to a JSON file
+func exportMetrics(scraper *Scraper) {
+	metricsFile := "scraping_metrics.json"
+	metricsData, err := json.MarshalIndent(scraper.metrics.GetMetrics(), "", "  ")
+	if err == nil {
+		if err := os.WriteFile(metricsFile, metricsData, 0644); err == nil {
+			fmt.Printf("✅ Metrics saved to %s\n", metricsFile)
+		}
+	}
+}
+
+// startAPIServerIfRequested starts the API server if a port is specified
+func startAPIServerIfRequested(scraper *Scraper, config *Config) {
+	apiPort := flag.Lookup("api-port").Value.String()
+	if apiPort != "0" {
+		port := 0
+		fmt.Sscanf(apiPort, "%d", &port)
+		if port > 0 {
+			fmt.Printf("\n🌐 Starting API server on port %d...\n", port)
+			if err := StartAPIServer(scraper, config, port); err != nil {
+				fmt.Printf("❌ Failed to start API server: %v\n", err)
 			}
 		}
 	}
+}
 
-	// Start API server if requested
-	if *apiPort > 0 {
-		fmt.Printf("\n🌐 Starting API server on port %d...\n", *apiPort)
-		if err := StartAPIServer(scraper, config, *apiPort); err != nil {
-			fmt.Printf("❌ Failed to start API server: %v\n", err)
-		}
-		return
-	}
-
+// printCompletionSummary displays the completion summary
+func printCompletionSummary(config *Config) {
 	fmt.Println("\n✨ Enhanced scraping complete! This demonstrates:")
 	fmt.Println("   • Advanced configuration management with environment variables")
 	fmt.Println("   • Structured logging with multiple levels")

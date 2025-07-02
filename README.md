@@ -2,15 +2,19 @@
 
 A scalable, production-ready Go web scraping service with asynchronous job API, persistent job state (Redis), containerization, and comprehensive testing.
 
-## Features
+## ✨ Features
 
-- **Asynchronous scraping API**: Submit jobs and poll for results.
-- **Persistent job state**: Uses Redis for resilience and multi-instance support.
-- **Scalable architecture**: Ready for distributed job processing.
-- **Comprehensive API tests**: Uses `httptest` for handler coverage.
-- **Containerized**: Docker and Docker Compose for easy deployment.
+- **🚀 Asynchronous scraping API**: Submit jobs and poll for results
+- **💾 Persistent job state**: Uses Redis for resilience and multi-instance support
+- **📈 Scalable architecture**: Ready for distributed job processing
+- **🛡️ Circuit breaker pattern**: Protects against cascading failures
+- **🔄 Retry logic**: Handles transient failures with exponential backoff
+- **📊 Comprehensive metrics**: Real-time performance monitoring
+- **🧪 Comprehensive API tests**: Uses `httptest` for handler coverage
+- **🐳 Containerized**: Docker and Docker Compose for easy deployment
+- **🏥 Health checks**: System monitoring and observability
 
-## Quick Start
+## 🚀 Quick Start
 
 ### Prerequisites
 - [Docker](https://www.docker.com/)
@@ -18,62 +22,115 @@ A scalable, production-ready Go web scraping service with asynchronous job API, 
 
 ### Run with Docker Compose
 
-```
+```bash
+# Clone the repository
+git clone <your-repo-url>
+cd go-practice
+
+# Start the service
 docker-compose up --build
 ```
+
+**Services Available:**
+- **API Server**: http://localhost:8080
+- **Redis**: localhost:6379
+- **Redis Commander UI**: http://localhost:8081
 
 - API: http://localhost:8080
 - Redis: localhost:6379
 - Redis Commander UI: http://localhost:8081
 
-### API Endpoints
+### 📡 API Endpoints
 
-- `POST /scrape` — Submit a new scraping job
-- `GET /job/status?id=...` — Get job status/results
-- `GET /health` — Health check
-- `GET /metrics` — Metrics (if enabled)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/scrape` | Submit a new scraping job |
+| `GET` | `/scrape/status?id=<job_id>` | Get job status and results |
+| `GET` | `/health` | Health check |
+| `GET` | `/metrics` | System metrics (if enabled) |
 
-### Example: Submit a Scrape Job
+### 📝 Example: Submit a Scrape Job
 
+```bash
+curl -X POST http://localhost:8080/scrape \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "urls": ["https://golang.org", "https://httpbin.org/get"]
+  }'
 ```
-curl -X POST http://localhost:8080/scrape -d '{"urls": ["https://example.com"]}' -H 'Content-Type: application/json'
+
+### 📊 Example: Check Job Status
+
+```bash
+curl "http://localhost:8080/scrape/status?id=<job_id>"
 ```
 
-### Example: Check Job Status
+### 🌐 Example: Scrape a Single Site
 
+```bash
+curl -X POST http://localhost:8080/scrape \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "site_url": "https://jsonplaceholder.typicode.com/posts"
+  }'
 ```
-curl http://localhost:8080/job/status?id=<job_id>
-```
 
-## Architecture Overview
+## 🏗️ Architecture Overview
 
-- **API Layer**: Handles HTTP requests, creates jobs, persists them in Redis.
-- **Persistent Storage**: Redis stores all job state, making the system resilient to restarts and ready for distributed scaling.
-- **Worker Model**: (Future) You can run multiple scraper instances as workers, all pulling jobs from Redis.
-- **Containerization**: Dockerfile and docker-compose.yml for reproducible, portable deployment.
+- **🌐 API Layer**: Handles HTTP requests, creates jobs, persists them in Redis
+- **💾 Persistent Storage**: Redis stores all job state, making the system resilient to restarts and ready for distributed scaling
+- **🛡️ Circuit Breaker**: Protects against cascading failures with automatic recovery
+- **🔄 Retry Logic**: Handles transient failures with exponential backoff
+- **📊 Metrics & Monitoring**: Real-time performance tracking and health checks
+- **🐳 Containerization**: Dockerfile and docker-compose.yml for reproducible, portable deployment
+- **🔧 Worker Model**: Ready for multiple scraper instances as workers, all pulling jobs from Redis
 
-## Configuration
+## ⚙️ Configuration
 
-Environment variables (see `docker-compose.yml`):
-- `SCRAPER_REDIS_ADDR` — Redis host (e.g., `redis:6379`)
-- `SCRAPER_REDIS_PASSWORD` — Redis password (optional)
-- `SCRAPER_REDIS_DB` — Redis DB index (default: 0)
-- Other config: see `config.go` for all options.
+Environment variables (see `.env.example` and `docker-compose.yml`):
 
-## Testing
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SCRAPER_API_PORT` | API server port | `8080` |
+| `SCRAPER_REDIS_ADDR` | Redis host | `redis:6379` |
+| `SCRAPER_REDIS_PASSWORD` | Redis password | (empty) |
+| `SCRAPER_REDIS_DB` | Redis DB index | `0` |
+| `SCRAPER_MAX_CONCURRENT` | Max concurrent requests | `5` |
+| `SCRAPER_REQUEST_TIMEOUT` | Request timeout | `10s` |
+| `SCRAPER_CIRCUIT_BREAKER_THRESHOLD` | Circuit breaker threshold | `3` |
+| `SCRAPER_ENABLE_METRICS` | Enable metrics collection | `true` |
+
+See `config.go` for all available options.
+
+## 🧪 Testing
 
 Run all tests:
 
-```
+```bash
 go test ./...
 ```
 
-## Extending for Distributed Job Queue
+Run tests with coverage:
 
-- Swap the in-process goroutine for a message queue (RabbitMQ, Kafka, or Redis Streams/Lists).
-- Run multiple scraper workers, each pulling jobs from the queue and updating job state in Redis.
-- This enables true horizontal scaling and high availability.
+```bash
+go test -v -cover ./...
+```
 
-## License
+## 🚀 Extending for Distributed Job Queue
 
-MIT 
+- **Message Queue**: Swap the in-process goroutine for a message queue (RabbitMQ, Kafka, or Redis Streams/Lists)
+- **Worker Scaling**: Run multiple scraper workers, each pulling jobs from the queue and updating job state in Redis
+- **Load Balancing**: Distribute scraping load across multiple instances
+- **High Availability**: Enable true horizontal scaling and fault tolerance
+
+## 📈 Performance Features
+
+- **Circuit Breaker**: Automatic failure detection and recovery
+- **Rate Limiting**: Domain-specific and global rate limiting
+- **Retry Logic**: Exponential backoff for transient failures
+- **Metrics Collection**: Real-time performance monitoring
+- **Health Checks**: System health monitoring
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) file for details. 

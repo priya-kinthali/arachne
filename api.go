@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,7 +26,6 @@ type APIHandler struct {
 	scraper *Scraper
 	config  *Config
 	storage Storage
-	mu      sync.RWMutex
 }
 
 // NewAPIHandler creates a new API handler

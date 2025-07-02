@@ -51,4 +51,12 @@ Thumbs.db
 
 # Temporary files
 tmp/
-temp/ 
+temp/
+
+# Docker volumes and data
+redis_data/
+scraping_results/
+
+# Local development files
+main
+*.local 

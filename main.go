@@ -429,18 +429,36 @@ func main() {
 	// Setup configuration
 	config := setupConfig()
 
-	// Create scraper and run scraping logic
+	// Create scraper
 	scraper := NewScraper(config)
-	results := runScrapingLogic(scraper, config)
 
-	// Process and save results
-	processAndSaveResults(scraper, config, results)
+	// Check if we should run in API mode (containerized or explicit flag)
+	apiPort := flag.Lookup("api-port").Value.String()
+	isContainerized := os.Getenv("SCRAPER_REDIS_ADDR") != "" // Detect containerized environment
 
-	// Start API server if requested
-	startAPIServerIfRequested(scraper, config)
+	if apiPort != "0" || isContainerized {
+		// API mode - start the server
+		port := 8080 // Default port for containerized environment
+		if apiPort != "0" {
+			fmt.Sscanf(apiPort, "%d", &port)
+		}
 
-	// Print completion summary
-	printCompletionSummary(config)
+		fmt.Printf("🚀 Starting Scraper API Server on port %d...\n", port)
+		fmt.Printf("Configuration: %s\n", config.String())
+
+		if err := StartAPIServer(scraper, config, port); err != nil {
+			fmt.Printf("❌ Failed to start API server: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		// CLI mode - run the demo scraping
+		fmt.Println("🚀 Starting Enhanced Concurrent Web Scraper in Go!")
+		fmt.Printf("Configuration: %s\n", config.String())
+
+		results := runScrapingLogic(scraper, config)
+		processAndSaveResults(scraper, config, results)
+		printCompletionSummary(config)
+	}
 }
 
 // setupConfig parses command-line flags and loads configuration
@@ -572,21 +590,6 @@ func exportMetrics(scraper *Scraper) {
 	if err == nil {
 		if err := os.WriteFile(metricsFile, metricsData, 0644); err == nil {
 			fmt.Printf("✅ Metrics saved to %s\n", metricsFile)
-		}
-	}
-}
-
-// startAPIServerIfRequested starts the API server if a port is specified
-func startAPIServerIfRequested(scraper *Scraper, config *Config) {
-	apiPort := flag.Lookup("api-port").Value.String()
-	if apiPort != "0" {
-		port := 0
-		fmt.Sscanf(apiPort, "%d", &port)
-		if port > 0 {
-			fmt.Printf("\n🌐 Starting API server on port %d...\n", port)
-			if err := StartAPIServer(scraper, config, port); err != nil {
-				fmt.Printf("❌ Failed to start API server: %v\n", err)
-			}
 		}
 	}
 }

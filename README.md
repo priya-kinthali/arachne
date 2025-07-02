@@ -1,6 +1,12 @@
-# Go Scraper Service
+<p align="center">
+  <img src="./assets/arachne-logo-transparent.png" alt="Arachne Logo" width="400">
+</p>
 
-A scalable, production-ready Go web scraping service with asynchronous job API, persistent job state (Redis), containerization, and comprehensive testing.
+<h1 align="center">Arachne</h1>
+
+<p align="center">
+  A scalable, production-ready Go web scraping service with an asynchronous job API, persistent job state, and containerization.
+</p>
 
 ## ✨ Features
 

@@ -8,6 +8,13 @@
   A scalable, production-ready Go web scraping service with an asynchronous job API, persistent job state, and containerization.
 </p>
 
+<p align="center">
+  <a href="https://goreportcard.com/report/github.com/kareemsasa3/arachne"><img src="https://goreportcard.com/badge/github.com/kareemsasa3/arachne" /></a>
+  <a href="https://github.com/kareemsasa3/arachne/blob/main/LICENSE"><img src="https://img.shields.io/github/license/kareemsasa3/arachne?style=flat-square&color=blue" /></a>
+  <a href="https://hub.docker.com/r/kareemsasa3/arachne"><img src="https://img.shields.io/docker/pulls/kareemsasa3/arachne.svg" /></a>
+  <a href="https://github.com/kareemsasa3/arachne/releases/latest"><img src="https://img.shields.io/github/v/release/kareemsasa3/arachne" /></a>
+</p>
+
 ## ✨ Features
 
 - **🚀 Asynchronous scraping API**: Submit jobs and poll for results

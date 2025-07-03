@@ -12,8 +12,8 @@ This guide will help you get the enhanced Go web scraper up and running quickly.
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/kareemsasa3/go-practice.git
-cd go-practice
+git clone https://github.com/kareemsasa3/arachne.git
+cd arachne
 ```
 
 ### 2. Verify Go Installation

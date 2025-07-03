@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"go-practice/internal/config"
-	"go-practice/internal/storage"
-	"go-practice/internal/types"
+	"arachne/internal/config"
+	"arachne/internal/storage"
+	"arachne/internal/types"
 )
 
 // MockScraper is a mock implementation for testing

@@ -11,8 +11,8 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/chromedp/chromedp"
 
-	"go-practice/internal/config"
-	"go-practice/internal/errors"
+	"arachne/internal/config"
+	"arachne/internal/errors"
 )
 
 // HeadlessStrategy implements scraping using headless Chrome browser

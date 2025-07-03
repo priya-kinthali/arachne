@@ -8,11 +8,11 @@ import (
 	"os"
 	"time"
 
-	"go-practice/internal/api"
-	"go-practice/internal/config"
-	"go-practice/internal/processor"
-	"go-practice/internal/scraper"
-	"go-practice/internal/types"
+	"arachne/internal/api"
+	"arachne/internal/config"
+	"arachne/internal/processor"
+	"arachne/internal/scraper"
+	"arachne/internal/types"
 )
 
 func main() {

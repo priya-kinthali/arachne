@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"time"
 
-	"go-practice/internal/config"
-	"go-practice/internal/errors"
-	"go-practice/pkg/parser"
+	"arachne/internal/config"
+	"arachne/internal/errors"
+	"arachne/pkg/parser"
 )
 
 // ScrapedResult is a unified struct returned by any strategy.

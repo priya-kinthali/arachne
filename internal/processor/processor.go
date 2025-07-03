@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"go-practice/internal/types"
+	"arachne/internal/types"
 )
 
 // ResultProcessor processes and formats results

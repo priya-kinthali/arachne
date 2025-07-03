@@ -4,10 +4,10 @@ import (
 	"testing"
 	"time"
 
-	"go-practice/internal/config"
-	"go-practice/internal/errors"
-	"go-practice/internal/metrics"
-	"go-practice/pkg/parser"
+	"arachne/internal/config"
+	"arachne/internal/errors"
+	"arachne/internal/metrics"
+	"arachne/pkg/parser"
 )
 
 func TestExtractHTMLTitle(t *testing.T) {

@@ -9,9 +9,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"go-practice/internal/config"
-	"go-practice/internal/storage"
-	"go-practice/internal/types"
+	"arachne/internal/config"
+	"arachne/internal/storage"
+	"arachne/internal/types"
 )
 
 // ScraperInterface defines the interface for scrapers

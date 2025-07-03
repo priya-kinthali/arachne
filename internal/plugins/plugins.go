@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"go-practice/internal/errors"
-	"go-practice/internal/types"
+	"arachne/internal/errors"
+	"arachne/internal/types"
 )
 
 // DataProcessor defines the interface for processing scraped data

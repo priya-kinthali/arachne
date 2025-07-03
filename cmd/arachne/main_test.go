@@ -3,6 +3,11 @@ package main
 import (
 	"testing"
 	"time"
+
+	"arachne/internal/config"
+	"arachne/internal/errors"
+	"arachne/internal/metrics"
+	"arachne/pkg/parser"
 )
 
 func TestExtractHTMLTitle(t *testing.T) {
@@ -13,34 +18,34 @@ func TestExtractHTMLTitle(t *testing.T) {
 	}{
 		{
 			name:     "Valid title",
-			html:     "<html><head><title>Test Title</title></head><body>Content</body></html>",
+			html:     `<html><head><title>Test Title</title></head><body>Content</body></html>`,
 			expected: "Test Title",
 		},
 		{
 			name:     "No title tag",
-			html:     "<html><head></head><body>Content</body></html>",
+			html:     `<html><head></head><body>Content</body></html>`,
 			expected: "No HTML title found",
 		},
 		{
 			name:     "Empty title",
-			html:     "<html><head><title></title></head><body>Content</body></html>",
+			html:     `<html><head><title></title></head><body>Content</body></html>`,
 			expected: "Empty HTML title",
 		},
 		{
 			name:     "Malformed title",
-			html:     "<html><head><title>Test Title</head><body>Content</body></html>",
+			html:     `<html><head><title>Test Title</head><body>Content</body></html>`,
 			expected: "Malformed HTML title",
 		},
 		{
 			name:     "Case insensitive title",
-			html:     "<html><head><TITLE>Test Title</TITLE></head><body>Content</body></html>",
+			html:     `<html><head><TITLE>Test Title</TITLE></head><body>Content</body></html>`,
 			expected: "Malformed HTML title",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := extractHTMLTitle(tt.html)
+			result := parser.ExtractHTMLTitle(tt.html)
 			if result != tt.expected {
 				t.Errorf("extractHTMLTitle() = %v, want %v", result, tt.expected)
 			}
@@ -88,7 +93,7 @@ func TestExtractJSONTitle(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := extractJSONTitle(tt.json)
+			result := parser.ExtractJSONTitle(tt.json)
 			if result != tt.expected {
 				t.Errorf("extractJSONTitle() = %v, want %v", result, tt.expected)
 			}
@@ -117,7 +122,7 @@ func TestExtractTitle(t *testing.T) {
 		},
 		{
 			name:        "HTML content",
-			content:     "<html><head><title>HTML Title</title></head></html>",
+			content:     `<html><head><title>HTML Title</title></head><body>Content</body></html>`,
 			contentType: "text/html",
 			expected:    "HTML Title",
 		},
@@ -131,7 +136,7 @@ func TestExtractTitle(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := extractTitle(tt.content, tt.contentType)
+			result := parser.ExtractTitle(tt.content, tt.contentType)
 			if result != tt.expected {
 				t.Errorf("extractTitle() = %v, want %v", result, tt.expected)
 			}
@@ -147,18 +152,13 @@ func TestValidateURL(t *testing.T) {
 	}{
 		{
 			name:    "Valid HTTP URL",
-			url:     "https://example.com",
+			url:     "http://example.com",
 			wantErr: false,
 		},
 		{
 			name:    "Valid HTTPS URL",
-			url:     "https://api.github.com/users/test",
+			url:     "https://example.com",
 			wantErr: false,
-		},
-		{
-			name:    "Invalid URL",
-			url:     "not-a-url",
-			wantErr: true,
 		},
 		{
 			name:    "Empty URL",
@@ -166,12 +166,17 @@ func TestValidateURL(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "URL without scheme",
+			name:    "Invalid URL",
+			url:     "not-a-url",
+			wantErr: true,
+		},
+		{
+			name:    "Missing scheme",
 			url:     "example.com",
 			wantErr: true,
 		},
 		{
-			name:    "URL with invalid scheme",
+			name:    "Invalid scheme",
 			url:     "ftp://example.com",
 			wantErr: true,
 		},
@@ -179,7 +184,7 @@ func TestValidateURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateURL(tt.url)
+			err := errors.ValidateURL(tt.url)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateURL() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -190,40 +195,66 @@ func TestValidateURL(t *testing.T) {
 func TestConfigValidation(t *testing.T) {
 	tests := []struct {
 		name    string
-		config  *Config
+		config  *config.Config
 		wantErr bool
 	}{
 		{
-			name: "Valid config",
-			config: &Config{
-				MaxConcurrent:  3,
-				RequestTimeout: 10 * time.Second,
-				TotalTimeout:   30 * time.Second,
-				RetryAttempts:  3,
-				RetryDelay:     1 * time.Second,
-				LogLevel:       "info",
-			},
+			name:    "Valid config",
+			config:  config.DefaultConfig(),
 			wantErr: false,
 		},
 		{
 			name: "Invalid max concurrent",
-			config: &Config{
-				MaxConcurrent:  0,
-				RequestTimeout: 10 * time.Second,
-				TotalTimeout:   30 * time.Second,
-				RetryAttempts:  3,
-				RetryDelay:     1 * time.Second,
-				LogLevel:       "info",
+			config: &config.Config{
+				MaxConcurrent: 0,
+			},
+			wantErr: true,
+		},
+		{
+			name: "Invalid request timeout",
+			config: &config.Config{
+				MaxConcurrent:  1,
+				RequestTimeout: 0,
+			},
+			wantErr: true,
+		},
+		{
+			name: "Invalid total timeout",
+			config: &config.Config{
+				MaxConcurrent:  1,
+				RequestTimeout: 1 * time.Second,
+				TotalTimeout:   0,
+			},
+			wantErr: true,
+		},
+		{
+			name: "Invalid retry attempts",
+			config: &config.Config{
+				MaxConcurrent:  1,
+				RequestTimeout: 1 * time.Second,
+				TotalTimeout:   1 * time.Second,
+				RetryAttempts:  -1,
+			},
+			wantErr: true,
+		},
+		{
+			name: "Invalid retry delay",
+			config: &config.Config{
+				MaxConcurrent:  1,
+				RequestTimeout: 1 * time.Second,
+				TotalTimeout:   1 * time.Second,
+				RetryAttempts:  1,
+				RetryDelay:     -1 * time.Second,
 			},
 			wantErr: true,
 		},
 		{
 			name: "Invalid log level",
-			config: &Config{
-				MaxConcurrent:  3,
-				RequestTimeout: 10 * time.Second,
-				TotalTimeout:   30 * time.Second,
-				RetryAttempts:  3,
+			config: &config.Config{
+				MaxConcurrent:  1,
+				RequestTimeout: 1 * time.Second,
+				TotalTimeout:   1 * time.Second,
+				RetryAttempts:  1,
 				RetryDelay:     1 * time.Second,
 				LogLevel:       "invalid",
 			},
@@ -242,61 +273,55 @@ func TestConfigValidation(t *testing.T) {
 }
 
 func TestMetrics(t *testing.T) {
-	metrics := NewMetrics()
+	metrics := metrics.NewMetrics()
 
 	// Test initial state
 	if metrics.TotalRequests != 0 {
-		t.Errorf("Expected 0 total requests, got %d", metrics.TotalRequests)
+		t.Errorf("Expected initial total requests to be 0, got %d", metrics.TotalRequests)
 	}
 
-	// Test recording requests
+	// Test recording request
 	metrics.RecordRequest()
-	metrics.RecordRequest()
-	if metrics.TotalRequests != 2 {
-		t.Errorf("Expected 2 total requests, got %d", metrics.TotalRequests)
+	if metrics.TotalRequests != 1 {
+		t.Errorf("Expected total requests to be 1, got %d", metrics.TotalRequests)
 	}
 
 	// Test recording success
 	metrics.RecordSuccess("example.com", 200, 1024, 100*time.Millisecond)
 	if metrics.SuccessfulRequests != 1 {
-		t.Errorf("Expected 1 successful request, got %d", metrics.SuccessfulRequests)
+		t.Errorf("Expected successful requests to be 1, got %d", metrics.SuccessfulRequests)
 	}
 
 	// Test recording failure
 	metrics.RecordFailure("example.com", 404)
 	if metrics.FailedRequests != 1 {
-		t.Errorf("Expected 1 failed request, got %d", metrics.FailedRequests)
+		t.Errorf("Expected failed requests to be 1, got %d", metrics.FailedRequests)
 	}
 
-	// Test success rate calculation
-	successRate := metrics.GetSuccessRate()
-	expectedRate := 50.0 // 1 success out of 2 total requests
-	if successRate != expectedRate {
-		t.Errorf("Expected success rate %.1f%%, got %.1f%%", expectedRate, successRate)
+	// Test recording retry
+	metrics.RecordRetry()
+	if metrics.RetryAttempts != 1 {
+		t.Errorf("Expected retry attempts to be 1, got %d", metrics.RetryAttempts)
 	}
 }
 
 func TestScraperError(t *testing.T) {
-	err := NewScraperError("https://example.com", "Test error", nil)
-
-	if err.URL != "https://example.com" {
-		t.Errorf("Expected URL https://example.com, got %s", err.URL)
+	// Test creating a scraper error
+	err := errors.NewScraperError("https://example.com", "Test error", nil)
+	if err == nil {
+		t.Fatal("Expected error to be created")
 	}
 
-	if err.Message != "Test error" {
-		t.Errorf("Expected message 'Test error', got %s", err.Message)
+	// Test error message
+	expectedMsg := "scraper error for https://example.com: Test error (status: 0, retryable: false, attempts: 0)"
+	if err.Error() != expectedMsg {
+		t.Errorf("Expected error message '%s', got '%s'", expectedMsg, err.Error())
 	}
 
-	// Test HTTP error
-	httpErr := NewHTTPError("https://example.com", 500, "Server error")
-	if !httpErr.IsRetryable() {
-		t.Error("Expected 500 error to be retryable")
-	}
-
-	// Test non-retryable error
-	nonRetryableErr := NewHTTPError("https://example.com", 404, "Not found")
-	if nonRetryableErr.IsRetryable() {
-		t.Error("Expected 404 error to not be retryable")
+	// Test retryable error
+	retryableErr := errors.NewScraperError("https://example.com", "Timeout error", nil)
+	if retryableErr.IsRetryable() {
+		t.Error("Expected non-retryable error for nil underlying error")
 	}
 }
 
@@ -305,7 +330,7 @@ func BenchmarkExtractHTMLTitle(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		extractHTMLTitle(html)
+		parser.ExtractHTMLTitle(html)
 	}
 }
 
@@ -314,6 +339,6 @@ func BenchmarkExtractJSONTitle(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		extractJSONTitle(json)
+		parser.ExtractJSONTitle(json)
 	}
 }

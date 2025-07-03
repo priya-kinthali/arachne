@@ -1,4 +1,4 @@
-package main
+package api
 
 import (
 	"context"
@@ -8,22 +8,26 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"arachne/internal/config"
+	"arachne/internal/storage"
+	"arachne/internal/types"
 )
 
 // ScraperInterface defines the interface for scrapers
 type ScraperInterface interface {
-	ScrapeURLs(urls []string) []ScrapedData
-	ScrapeSite(siteURL string) []ScrapedData
+	ScrapeURLs(urls []string) []types.ScrapedData
+	ScrapeSite(siteURL string) []types.ScrapedData
 	GetMetrics() interface{}
 }
 
 // Storage interface for job persistence
 type Storage interface {
-	SaveJob(ctx context.Context, job *ScrapingJob) error
-	GetJob(ctx context.Context, jobID string) (*ScrapingJob, error)
-	UpdateJob(ctx context.Context, job *ScrapingJob) error
+	SaveJob(ctx context.Context, job *storage.ScrapingJob) error
+	GetJob(ctx context.Context, jobID string) (*storage.ScrapingJob, error)
+	UpdateJob(ctx context.Context, job *storage.ScrapingJob) error
 	ListJobs(ctx context.Context) ([]string, error)
-	GetJobsByStatus(ctx context.Context, status string) ([]*ScrapingJob, error)
+	GetJobsByStatus(ctx context.Context, status string) ([]*storage.ScrapingJob, error)
 	DeleteJob(ctx context.Context, jobID string) error
 	Close() error
 }
@@ -31,30 +35,17 @@ type Storage interface {
 // APIHandler handles HTTP API requests
 type APIHandler struct {
 	scraper ScraperInterface
-	config  *Config
+	config  *config.Config
 	storage Storage
 }
 
 // NewAPIHandler creates a new API handler
-func NewAPIHandler(scraper ScraperInterface, config *Config, storage Storage) *APIHandler {
+func NewAPIHandler(scraper ScraperInterface, cfg *config.Config, storage Storage) *APIHandler {
 	return &APIHandler{
 		scraper: scraper,
-		config:  config,
+		config:  cfg,
 		storage: storage,
 	}
-}
-
-// ScrapingJob represents an asynchronous scraping job
-type ScrapingJob struct {
-	ID          string        `json:"id"`
-	Status      string        `json:"status"` // "pending", "running", "completed", "failed"
-	Request     ScrapeRequest `json:"request"`
-	Results     []ScrapedData `json:"results,omitempty"`
-	Error       string        `json:"error,omitempty"`
-	CreatedAt   time.Time     `json:"created_at"`
-	StartedAt   *time.Time    `json:"started_at,omitempty"`
-	CompletedAt *time.Time    `json:"completed_at,omitempty"`
-	Progress    int           `json:"progress"` // 0-100
 }
 
 // ScrapeRequest represents a scraping request
@@ -65,15 +56,16 @@ type ScrapeRequest struct {
 
 // ScrapeResponse represents a scraping response
 type ScrapeResponse struct {
-	JobID   string `json:"job_id"`
-	Status  string `json:"status"`
-	Message string `json:"message"`
+	JobID   string              `json:"job_id"`
+	Status  string              `json:"status"`
+	Results []types.ScrapedData `json:"results,omitempty"`
+	Error   string              `json:"error,omitempty"`
 }
 
 // JobStatusResponse represents a job status response
 type JobStatusResponse struct {
-	Job     *ScrapingJob `json:"job"`
-	Metrics interface{}  `json:"metrics,omitempty"`
+	Job     *storage.ScrapingJob `json:"job"`
+	Metrics interface{}          `json:"metrics,omitempty"`
 }
 
 // HandleScrape handles scraping requests asynchronously
@@ -97,10 +89,10 @@ func (h *APIHandler) HandleScrape(w http.ResponseWriter, r *http.Request) {
 
 	// Create job
 	jobID := uuid.New().String()
-	job := &ScrapingJob{
+	job := &storage.ScrapingJob{
 		ID:        jobID,
 		Status:    "pending",
-		Request:   req,
+		Request:   storage.ScrapeRequest{URLs: req.URLs, SiteURL: req.SiteURL},
 		CreatedAt: time.Now(),
 		Progress:  0,
 	}
@@ -119,7 +111,8 @@ func (h *APIHandler) HandleScrape(w http.ResponseWriter, r *http.Request) {
 	response := ScrapeResponse{
 		JobID:   jobID,
 		Status:  "accepted",
-		Message: "Scraping job created successfully",
+		Results: []types.ScrapedData{},
+		Error:   "",
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -168,7 +161,7 @@ func (h *APIHandler) HandleJobStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // executeScrapingJob executes a scraping job in the background
-func (h *APIHandler) executeScrapingJob(job *ScrapingJob) {
+func (h *APIHandler) executeScrapingJob(job *storage.ScrapingJob) {
 	ctx := context.Background()
 
 	// Update job status to running
@@ -180,7 +173,7 @@ func (h *APIHandler) executeScrapingJob(job *ScrapingJob) {
 		fmt.Printf("Failed to update job status to running: %v\n", err)
 	}
 
-	var results []ScrapedData
+	var results []types.ScrapedData
 
 	// Execute scraping based on request type
 	if job.Request.SiteURL != "" {
@@ -190,11 +183,11 @@ func (h *APIHandler) executeScrapingJob(job *ScrapingJob) {
 	}
 
 	// Update job with results
-	job.Results = results
-	job.Progress = 100
-	now = time.Now()
-	job.CompletedAt = &now
 	job.Status = "completed"
+	job.Results = results
+	completedAt := time.Now()
+	job.CompletedAt = &completedAt
+	job.Progress = 100
 
 	if err := h.storage.UpdateJob(ctx, job); err != nil {
 		fmt.Printf("Failed to update job with results: %v\n", err)
@@ -231,25 +224,25 @@ func (h *APIHandler) HandleMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 // StartAPIServer starts the HTTP API server
-func StartAPIServer(scraper ScraperInterface, config *Config, port int) error {
+func StartAPIServer(scraper ScraperInterface, cfg *config.Config, port int) error {
 	// Initialize storage based on configuration
-	var storage Storage
+	var storageBackend Storage
 	var err error
 
-	if config.RedisAddr != "" {
+	if cfg.RedisAddr != "" {
 		// Use Redis for persistent storage
-		storage, err = NewRedisStorage(config.RedisAddr, config.RedisPassword, config.RedisDB)
+		storageBackend, err = storage.NewRedisStorage(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
 		if err != nil {
 			return fmt.Errorf("failed to initialize Redis storage: %w", err)
 		}
-		fmt.Printf("Using Redis storage at %s\n", config.RedisAddr)
+		fmt.Printf("Using Redis storage at %s\n", cfg.RedisAddr)
 	} else {
 		// Fall back to in-memory storage
-		storage = NewInMemoryStorage()
+		storageBackend = storage.NewInMemoryStorage()
 		fmt.Println("Using in-memory storage (not persistent)")
 	}
 
-	handler := NewAPIHandler(scraper, config, storage)
+	handler := NewAPIHandler(scraper, cfg, storageBackend)
 
 	// Set up routes
 	http.HandleFunc("/scrape", handler.HandleScrape)

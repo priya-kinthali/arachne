@@ -1,14 +1,17 @@
-package main
+package plugins
 
 import (
 	"context"
 	"fmt"
 	"strings"
+
+	"arachne/internal/errors"
+	"arachne/internal/types"
 )
 
 // DataProcessor defines the interface for processing scraped data
 type DataProcessor interface {
-	Process(ctx context.Context, data *ScrapedData) error
+	Process(ctx context.Context, data *types.ScrapedData) error
 	Name() string
 }
 
@@ -30,7 +33,7 @@ func (pm *PluginManager) RegisterPlugin(processor DataProcessor) {
 }
 
 // ProcessData processes data through all registered plugins
-func (pm *PluginManager) ProcessData(ctx context.Context, data *ScrapedData) error {
+func (pm *PluginManager) ProcessData(ctx context.Context, data *types.ScrapedData) error {
 	for _, processor := range pm.processors {
 		if err := processor.Process(ctx, data); err != nil {
 			return fmt.Errorf("plugin %s failed: %v", processor.Name(), err)
@@ -55,7 +58,7 @@ func NewTitleCleanerPlugin() *TitleCleanerPlugin {
 }
 
 // Process cleans the title
-func (t *TitleCleanerPlugin) Process(ctx context.Context, data *ScrapedData) error {
+func (t *TitleCleanerPlugin) Process(ctx context.Context, data *types.ScrapedData) error {
 	if data.Title != "" {
 		// Remove extra whitespace and normalize
 		data.Title = strings.TrimSpace(data.Title)
@@ -81,9 +84,9 @@ func NewURLValidatorPlugin() *URLValidatorPlugin {
 }
 
 // Process validates the URL
-func (u *URLValidatorPlugin) Process(ctx context.Context, data *ScrapedData) error {
+func (u *URLValidatorPlugin) Process(ctx context.Context, data *types.ScrapedData) error {
 	if data.URL != "" {
-		if err := ValidateURL(data.URL); err != nil {
+		if err := errors.ValidateURL(data.URL); err != nil {
 			data.Error = fmt.Sprintf("Invalid URL: %v", err)
 		}
 	}
@@ -104,7 +107,7 @@ func NewContentTypePlugin() *ContentTypePlugin {
 }
 
 // Process adds content type information
-func (c *ContentTypePlugin) Process(ctx context.Context, data *ScrapedData) error {
+func (c *ContentTypePlugin) Process(ctx context.Context, data *types.ScrapedData) error {
 	// This plugin could be extended to add content type detection
 	// For now, it's a placeholder for future functionality
 	return nil

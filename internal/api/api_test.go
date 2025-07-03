@@ -1,4 +1,4 @@
-package main
+package api
 
 import (
 	"bytes"
@@ -9,15 +9,19 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"arachne/internal/config"
+	"arachne/internal/storage"
+	"arachne/internal/types"
 )
 
 // MockScraper is a mock implementation for testing
 type MockScraper struct{}
 
-func (m *MockScraper) ScrapeURLs(urls []string) []ScrapedData {
-	results := make([]ScrapedData, len(urls))
+func (m *MockScraper) ScrapeURLs(urls []string) []types.ScrapedData {
+	results := make([]types.ScrapedData, len(urls))
 	for i, url := range urls {
-		results[i] = ScrapedData{
+		results[i] = types.ScrapedData{
 			URL:     url,
 			Title:   "Mock Title for " + url,
 			Status:  200,
@@ -28,8 +32,8 @@ func (m *MockScraper) ScrapeURLs(urls []string) []ScrapedData {
 	return results
 }
 
-func (m *MockScraper) ScrapeSite(siteURL string) []ScrapedData {
-	return []ScrapedData{
+func (m *MockScraper) ScrapeSite(siteURL string) []types.ScrapedData {
+	return []types.ScrapedData{
 		{
 			URL:     siteURL,
 			Title:   "Mock Site Title for " + siteURL,
@@ -58,9 +62,9 @@ func TestHandleHealth(t *testing.T) {
 
 	// We use httptest.NewRecorder to record the response
 	rr := httptest.NewRecorder()
-	storage := NewInMemoryStorage()
+	storageBackend := storage.NewInMemoryStorage()
 	mockScraper := &MockScraper{}
-	handler := http.HandlerFunc(NewAPIHandler(mockScraper, DefaultConfig(), storage).HandleHealth)
+	handler := http.HandlerFunc(NewAPIHandler(mockScraper, config.DefaultConfig(), storageBackend).HandleHealth)
 
 	// Our handlers satisfy http.Handler, so we can call their ServeHTTP method
 	// directly and pass in our Request and ResponseRecorder
@@ -87,9 +91,9 @@ func TestHandleHealth(t *testing.T) {
 }
 
 func TestHandleScrape(t *testing.T) {
-	storage := NewInMemoryStorage()
+	storageBackend := storage.NewInMemoryStorage()
 	mockScraper := &MockScraper{}
-	handler := NewAPIHandler(mockScraper, DefaultConfig(), storage)
+	handler := NewAPIHandler(mockScraper, config.DefaultConfig(), storageBackend)
 
 	tests := []struct {
 		name           string
@@ -103,14 +107,14 @@ func TestHandleScrape(t *testing.T) {
 			method:         "POST",
 			body:           `{"urls": ["https://example.com", "https://test.com"]}`,
 			expectedStatus: http.StatusAccepted,
-			expectedFields: []string{"job_id", "status", "message"},
+			expectedFields: []string{"job_id", "status"},
 		},
 		{
 			name:           "Valid scrape request with site URL",
 			method:         "POST",
 			body:           `{"site_url": "https://example.com"}`,
 			expectedStatus: http.StatusAccepted,
-			expectedFields: []string{"job_id", "status", "message"},
+			expectedFields: []string{"job_id", "status"},
 		},
 		{
 			name:           "Invalid method",
@@ -168,7 +172,7 @@ func TestHandleScrape(t *testing.T) {
 				}
 
 				// Check that job exists in storage
-				job, err := storage.GetJob(context.Background(), response.JobID)
+				job, err := storageBackend.GetJob(context.Background(), response.JobID)
 				if err != nil {
 					t.Errorf("job not found in storage: %v", err)
 				}
@@ -195,18 +199,18 @@ func TestHandleScrape(t *testing.T) {
 }
 
 func TestHandleJobStatus(t *testing.T) {
-	storage := NewInMemoryStorage()
+	storageBackend := storage.NewInMemoryStorage()
 	mockScraper := &MockScraper{}
-	handler := NewAPIHandler(mockScraper, DefaultConfig(), storage)
+	handler := NewAPIHandler(mockScraper, config.DefaultConfig(), storageBackend)
 
 	// Create a test job
-	testJob := &ScrapingJob{
+	testJob := &storage.ScrapingJob{
 		ID:        "test-job-123",
 		Status:    "completed",
 		CreatedAt: time.Now(),
 		Progress:  100,
 	}
-	if err := storage.SaveJob(context.Background(), testJob); err != nil {
+	if err := storageBackend.SaveJob(context.Background(), testJob); err != nil {
 		t.Fatalf("failed to save test job: %v", err)
 	}
 
@@ -249,7 +253,7 @@ func TestHandleJobStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			url := "/job/status"
+			url := "/scrape/status"
 			if tt.jobID != "" {
 				url += "?id=" + tt.jobID
 			}
@@ -293,11 +297,11 @@ func TestHandleJobStatus(t *testing.T) {
 }
 
 func TestHandleMetrics(t *testing.T) {
-	config := DefaultConfig()
-	config.EnableMetrics = true
-	storage := NewInMemoryStorage()
+	cfg := config.DefaultConfig()
+	cfg.EnableMetrics = true
+	storageBackend := storage.NewInMemoryStorage()
 	mockScraper := &MockScraper{}
-	handler := NewAPIHandler(mockScraper, config, storage)
+	handler := NewAPIHandler(mockScraper, cfg, storageBackend)
 
 	// Test with metrics enabled
 	t.Run("Metrics enabled", func(t *testing.T) {
@@ -323,9 +327,9 @@ func TestHandleMetrics(t *testing.T) {
 
 	// Test with metrics disabled
 	t.Run("Metrics disabled", func(t *testing.T) {
-		config.EnableMetrics = false
+		cfg.EnableMetrics = false
 		mockScraper := &MockScraper{}
-		handler := NewAPIHandler(mockScraper, config, storage)
+		handler := NewAPIHandler(mockScraper, cfg, storageBackend)
 
 		req, err := http.NewRequest("GET", "/metrics", nil)
 		if err != nil {
@@ -344,25 +348,25 @@ func TestHandleMetrics(t *testing.T) {
 }
 
 func TestStorageInterface(t *testing.T) {
-	storage := NewInMemoryStorage()
+	storageBackend := storage.NewInMemoryStorage()
 	ctx := context.Background()
 
 	// Test job creation and retrieval
 	t.Run("Save and Get Job", func(t *testing.T) {
-		job := &ScrapingJob{
+		job := &storage.ScrapingJob{
 			ID:        "test-job",
 			Status:    "pending",
 			CreatedAt: time.Now(),
 		}
 
 		// Save job
-		err := storage.SaveJob(ctx, job)
+		err := storageBackend.SaveJob(ctx, job)
 		if err != nil {
 			t.Fatalf("failed to save job: %v", err)
 		}
 
 		// Retrieve job
-		retrievedJob, err := storage.GetJob(ctx, job.ID)
+		retrievedJob, err := storageBackend.GetJob(ctx, job.ID)
 		if err != nil {
 			t.Fatalf("failed to get job: %v", err)
 		}
@@ -378,27 +382,27 @@ func TestStorageInterface(t *testing.T) {
 
 	// Test job update
 	t.Run("Update Job", func(t *testing.T) {
-		job := &ScrapingJob{
+		job := &storage.ScrapingJob{
 			ID:        "update-test-job",
 			Status:    "pending",
 			CreatedAt: time.Now(),
 		}
 
 		// Save initial job
-		err := storage.SaveJob(ctx, job)
+		err := storageBackend.SaveJob(ctx, job)
 		if err != nil {
 			t.Fatalf("failed to save job: %v", err)
 		}
 
 		// Update job
 		job.Status = "completed"
-		err = storage.UpdateJob(ctx, job)
+		err = storageBackend.UpdateJob(ctx, job)
 		if err != nil {
 			t.Fatalf("failed to update job: %v", err)
 		}
 
 		// Verify update
-		retrievedJob, err := storage.GetJob(ctx, job.ID)
+		retrievedJob, err := storageBackend.GetJob(ctx, job.ID)
 		if err != nil {
 			t.Fatalf("failed to get updated job: %v", err)
 		}
@@ -410,7 +414,7 @@ func TestStorageInterface(t *testing.T) {
 
 	// Test job listing
 	t.Run("List Jobs", func(t *testing.T) {
-		jobIDs, err := storage.ListJobs(ctx)
+		jobIDs, err := storageBackend.ListJobs(ctx)
 		if err != nil {
 			t.Fatalf("failed to list jobs: %v", err)
 		}
@@ -423,26 +427,26 @@ func TestStorageInterface(t *testing.T) {
 
 	// Test job deletion
 	t.Run("Delete Job", func(t *testing.T) {
-		job := &ScrapingJob{
+		job := &storage.ScrapingJob{
 			ID:        "delete-test-job",
 			Status:    "pending",
 			CreatedAt: time.Now(),
 		}
 
 		// Save job
-		err := storage.SaveJob(ctx, job)
+		err := storageBackend.SaveJob(ctx, job)
 		if err != nil {
 			t.Fatalf("failed to save job: %v", err)
 		}
 
 		// Delete job
-		err = storage.DeleteJob(ctx, job.ID)
+		err = storageBackend.DeleteJob(ctx, job.ID)
 		if err != nil {
 			t.Fatalf("failed to delete job: %v", err)
 		}
 
 		// Verify deletion
-		_, err = storage.GetJob(ctx, job.ID)
+		_, err = storageBackend.GetJob(ctx, job.ID)
 		if err == nil {
 			t.Error("expected error when getting deleted job, got nil")
 		}
@@ -450,9 +454,9 @@ func TestStorageInterface(t *testing.T) {
 }
 
 func TestScrapeJobLifecycle(t *testing.T) {
-	storage := NewInMemoryStorage()
+	storageBackend := storage.NewInMemoryStorage()
 	mockScraper := &MockScraper{}
-	handler := NewAPIHandler(mockScraper, DefaultConfig(), storage)
+	handler := NewAPIHandler(mockScraper, config.DefaultConfig(), storageBackend)
 
 	// Step 1: Submit a job
 	requestBody := `{"urls": ["https://example.com", "https://test.com"]}`
@@ -476,13 +480,13 @@ func TestScrapeJobLifecycle(t *testing.T) {
 	jobID := response.JobID
 
 	// Step 2: Poll for job status until completed (with timeout)
-	var job *ScrapingJob
+	var job *storage.ScrapingJob
 	var pollErr error
 	maxWait := 2 * time.Second
 	interval := 20 * time.Millisecond
 	start := time.Now()
 	for {
-		job, pollErr = storage.GetJob(context.Background(), jobID)
+		job, pollErr = storageBackend.GetJob(context.Background(), jobID)
 		if pollErr != nil {
 			t.Fatalf("job not found in storage: %v", pollErr)
 		}

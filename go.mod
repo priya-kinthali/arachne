@@ -1,4 +1,4 @@
-module go-practice
+module arachne
 
 go 1.23.0
 

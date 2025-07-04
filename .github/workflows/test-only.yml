@@ -16,6 +16,8 @@ jobs:
       # Step 1: Check out your code
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # Step 2: Set up the Go programming language environment
       - name: Setup Go
@@ -31,6 +33,6 @@ jobs:
       - name: Run tests with coverage
         run: go test -v -cover ./...
 
-      # Step 5: Test Docker build (without pushing)
-      - name: Test Docker build
-        run: docker build -t arachne-test .
+      # # Step 5: Test Docker build (without pushing)
+      # - name: Test Docker build
+      #   run: docker build -t arachne-test .

@@ -2,8 +2,10 @@ name: Build and Push Docker Image
 
 # This action runs every time you push code to the 'main' branch (e.g., after merging a PR)
 on:
-  push:
-    branches: [main]
+  # push:
+  #   branches: [main]
+  workflow_dispatch:
+    
 
 jobs:
   build-and-push:

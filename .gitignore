@@ -18,8 +18,8 @@
 go.work
 
 # Build artifacts
-scraper
-scraper-*
+# scraper
+# scraper-*
 *.tar.gz
 *.zip
 
